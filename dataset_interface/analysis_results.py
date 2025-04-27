@@ -13,6 +13,7 @@ from evaluation import get_dataset
 from analysis.extract_results import extract_results
 from analysis.plot_results import get_auc_curve, get_prec_curve
 from evaluation.environment import env_settings
+import argparse
 
 SimpleTracker = namedtuple('SimpleTracker', ['name', 'parameter_name', 'run_id', 'results_dir', 'display_name'])
 
@@ -88,10 +89,14 @@ def evaluate_direct(results_path, dataset_name):
 
 if __name__ == "__main__":
 
-    my_results_path = "/data1/lihaobo/tracking/data/OTB_lang/tracking_results_save"
-    my_dataset_name = "otb_lang"
+    parser = argparse.ArgumentParser(description='Evaluate tracking results directly from prediction files.')
+    parser.add_argument('results_path', type=str, help='Path to the directory containing prediction txt files.')
+    parser.add_argument('dataset_name', type=str, help='Name of the dataset to evaluate on.')
     
-
+    args = parser.parse_args()
+    
+    my_results_path = args.results_path
+    my_dataset_name = args.dataset_name
     
     evaluate_direct(my_results_path, my_dataset_name)
 
