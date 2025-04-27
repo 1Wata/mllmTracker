@@ -4,12 +4,7 @@
 # Keep the folders you want to push
 !dataset_interface/
 !rft/
+!rft/**  # <-- Add this line to un-ignore contents inside rft
 
 # Keep the .gitignore file itself
 !.gitignore
-
-# --- Add this line to ignore the share_models subfolder within rft ---
-rft/share_models/
-# If your desired folders contain subfolders or files you also want to ignore,
-# add specific rules below. For example, to ignore a specific subfolder:
-# dataset_interface/temp_files/
