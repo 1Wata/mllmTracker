@@ -28,7 +28,7 @@ def build_json_dataset(pytorch_dataset, output_dir="output_datasets", template_f
     """
     裁剪图像并构建类似 ShareGPT 格式的数据集 (messages, images)。
     支持多个模板帧和单个搜索帧。使用绝对图像路径。
-    跳过目标不完全可见的样本，并且不保存这些样本的任何图像。
+    仅在所有可见性检查通过（包括目标在搜索裁剪区域内）后才保存图像。
 
     Args:
         pytorch_dataset: PyTorch 数据集实例。
@@ -87,7 +87,7 @@ def build_json_dataset(pytorch_dataset, output_dir="output_datasets", template_f
             search_bbox_orig_raw = annotations_dict["bbox"][search_idx].tolist() if isinstance(annotations_dict["bbox"][search_idx], torch.Tensor) else annotations_dict["bbox"][search_idx]
             search_bbox_orig = convert_bbox_format(search_bbox_orig_raw) # [x1, y1, x2, y2]
 
-            # --- 执行所有可见性检查 ---
+            # --- 执行原始图像可见性检查 ---
             skip_sample = False
             # 检查模板帧
             for t_idx, template_idx_val in enumerate(template_indices):
@@ -119,16 +119,39 @@ def build_json_dataset(pytorch_dataset, output_dir="output_datasets", template_f
                 skipped_count += 1
                 continue
 
-            # --- 所有检查通过，现在创建目录并处理图像 ---
+            # --- 应用抖动到模板BBox ---
+            template_bboxes_jittered = [jitter_bbox(bbox, jitter_scale=0.05) for bbox in template_bboxes_orig]
+
+            # --- 尝试裁剪搜索帧并检查目标是否在裁剪区域内 ---
+            # 使用第一个抖动后的模板框作为参考来确定搜索区域
+            reference_bbox_for_search_crop = template_bboxes_jittered[0]
+            try:
+                # 调用 crop_and_pad_search，如果目标不在区域内会抛出 ValueError
+                cropped_search_img, search_bbox_new, crop_region, _ = crop_and_pad_search(
+                    search_path, reference_bbox_for_search_crop, search_bbox_orig,
+                    scale=search_scale, resize=resize
+                )
+                # 如果到这里没有出错，说明目标在搜索裁剪区域内
+
+            except ValueError as e: # 目标不在裁剪区域内
+                # print(f"Skipping sample {i} because target is outside crop region during search crop: {e}")
+                skipped_count += 1
+                continue # 跳过此样本，不保存任何内容
+            except Exception as crop_err: # 其他裁剪错误
+                print(f"Error during initial search crop check for sample {i}: {crop_err}")
+                skipped_count += 1
+                continue # 跳过此样本
+
+            # --- 所有检查通过，现在创建目录并处理/保存图像 ---
             sample_dir = os.path.join(cropped_images_base_dir, f"sample_{i:06d}")
             os.makedirs(sample_dir, exist_ok=True)
 
-            # --- 处理模板帧 (抖动, 裁剪, 保存) ---
-            template_bboxes_jittered = [jitter_bbox(bbox, jitter_scale=0.05) for bbox in template_bboxes_orig] # 应用抖动
+            # --- 处理并保存模板帧 ---
             cropped_template_abs_paths = [] # Store absolute paths
+            skip_due_to_template_error = False
             for t_idx, template_idx_val in enumerate(template_indices):
                 t_path = template_paths[t_idx]
-                t_bbox_jittered = template_bboxes_jittered[t_idx]
+                t_bbox_jittered = template_bboxes_jittered[t_idx] # 使用之前抖动过的bbox
 
                 try:
                     cropped_template = crop_and_pad_template(t_path, t_bbox_jittered, scale=scale, resize=resize)
@@ -137,40 +160,30 @@ def build_json_dataset(pytorch_dataset, output_dir="output_datasets", template_f
                     cropped_template.save(template_save_path)
                     cropped_template_abs_paths.append(template_save_path) # Store absolute path
                 except Exception as crop_err:
-                    print(f"Error cropping/saving template {template_idx_val} for sample {i}: {crop_err}")
-                    skip_sample = True # 如果裁剪/保存失败，也跳过此样本
-                    break # 停止处理此样本的后续模板或搜索帧
-            if skip_sample:
-                # 如果模板裁剪/保存失败，需要清理已创建的目录和可能已保存的部分文件（可选）
-                # import shutil
-                # shutil.rmtree(sample_dir, ignore_errors=True)
+                    print(f"Error cropping/saving template {template_idx_val} for sample {i} (after passing checks): {crop_err}")
+                    skip_due_to_template_error = True # 标记错误
+                    break # 停止处理此样本的后续模板
+            
+            if skip_due_to_template_error:
+                # 如果模板裁剪/保存失败，清理已创建的目录和文件
+                import shutil
+                shutil.rmtree(sample_dir, ignore_errors=True)
                 skipped_count += 1
                 continue
 
-            # --- 处理搜索帧 (裁剪, 保存) ---
+            # --- 保存之前已成功裁剪的搜索帧 ---
             try:
-                reference_bbox_for_search_crop = template_bboxes_jittered[0]
-                cropped_search_img, search_bbox_new, crop_region, _ = crop_and_pad_search(
-                    search_path, reference_bbox_for_search_crop, search_bbox_orig,
-                    scale=search_scale, resize=resize
-                )
                 search_filename = "search.jpg"
                 search_save_path = os.path.join(sample_dir, search_filename) # Absolute path
-                cropped_search_img.save(search_save_path)
+                cropped_search_img.save(search_save_path) # cropped_search_img 来自之前的 try 块
                 search_image_abs_path = search_save_path # Store absolute path
-
-            except ValueError as e: # crop_and_pad_search 内部可能抛出目标不在区域内的错误
-                # print(f"Skipping sample {i} because target is outside crop region during search crop: {e}")
-                # import shutil
-                # shutil.rmtree(sample_dir, ignore_errors=True) # 清理
-                skipped_count += 1
-                continue
-            except Exception as crop_err:
-                print(f"Error cropping/saving search frame for sample {i}: {crop_err}")
-                # import shutil
-                # shutil.rmtree(sample_dir, ignore_errors=True) # 清理
-                skipped_count += 1
-                continue
+            except Exception as save_err:
+                 print(f"Error saving search frame for sample {i} (after passing checks): {save_err}")
+                 # 清理已创建的目录和文件
+                 import shutil
+                 shutil.rmtree(sample_dir, ignore_errors=True)
+                 skipped_count += 1
+                 continue
 
             # --- 构建 messages 和 images ---
             messages = []
@@ -187,7 +200,7 @@ def build_json_dataset(pytorch_dataset, output_dir="output_datasets", template_f
                                  f" Provide its bounding box as [x1, y1, x2, y2] coordinates within that image.")
 
             messages.append({"role": "user", "content": user_content})
-            formatted_bbox = [int(coord) for coord in search_bbox_new]
+            formatted_bbox = [int(coord) for coord in search_bbox_new] # search_bbox_new 来自之前的 try 块
             assistant_content = f"The object '{exp_str}' is located at [{formatted_bbox[0]}, {formatted_bbox[1]}, {formatted_bbox[2]}, {formatted_bbox[3]}]."
             messages.append({"role": "assistant", "content": assistant_content})
 
@@ -205,10 +218,11 @@ def build_json_dataset(pytorch_dataset, output_dir="output_datasets", template_f
             import traceback
             traceback.print_exc() # 打印详细错误堆栈
             skipped_count += 1
-            # 尝试清理可能已创建的目录
-            # sample_dir_potential = os.path.join(cropped_images_base_dir, f"sample_{i:06d}")
-            # import shutil
-            # shutil.rmtree(sample_dir_potential, ignore_errors=True)
+            # 尝试清理可能已创建的目录 (如果错误发生在目录创建之后)
+            sample_dir_potential = os.path.join(cropped_images_base_dir, f"sample_{i:06d}")
+            if os.path.exists(sample_dir_potential):
+                 import shutil
+                 shutil.rmtree(sample_dir_potential, ignore_errors=True)
             continue
 
     # --- 保存最终的JSON文件 ---
@@ -250,7 +264,7 @@ if __name__ == "__main__":
 
 
     # 构建数据集
-    output_dir = "/data1/lihaobo/tracking/data/cropped_dataset_visible"
+    output_dir = "/data1/lihaobo/tracking/data/cropped_sft"
     json_path, images_dir = build_json_dataset(
         train_dataset,
         output_dir=output_dir,

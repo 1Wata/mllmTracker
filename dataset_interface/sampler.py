@@ -193,13 +193,16 @@ class TrackingSampler(torch.utils.data.Dataset):
                         min_id=base_frame_id[0] - self.max_gap - gap_increase,
                         max_id=base_frame_id[0] - 1,  # 确保前序帧在基准帧之前
                     )
+                    if template_frame_ids is None:
+                        gap_increase += 5
+                        continue
                     template_frame_ids = template_frame_ids + base_frame_id
                     
-                    # gap = 200
-                    gap = self.num_template_frames + 1
+                    gap = 50
+                    # gap = self.num_template_frames + 1
                     search_frame_ids = self._sample_visible_ids(
                         visible,
-                        num_ids=self.num_template_frames - 1,
+                        num_ids=1,
                         min_id=template_frame_ids[-1] + 1,
                         max_id=min(template_frame_ids[-1] + gap, len(visible)),
                     )

@@ -209,7 +209,7 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
             tracking_instruction += "Use [0, 0, 0, 0] if the object is not visible."
             init_user_content.append({"text": tracking_instruction})
 
-            # 创建用户消息
+
             init_user_msg = {"role": "user", "content": init_user_content}
             prompt_messages = [init_user_msg]
 
