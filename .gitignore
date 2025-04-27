@@ -1,0 +1,14 @@
+# filepath: .gitignore
+# Ignore everything first
+*
+
+# Keep the folders you want to push (add a trailing slash for directories)
+!dataset_interface/
+!rft/
+
+# Keep the .gitignore file itself
+!.gitignore
+
+# If your desired folders contain subfolders or files you also want to ignore,
+# add specific rules below. For example, to ignore a specific subfolder:
+# dataset_interface/temp_files/
