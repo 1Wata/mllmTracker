@@ -1,0 +1,21 @@
+{"time":"2025-04-26T23:51:48.032727999+08:00","level":"INFO","msg":"using version","core version":"0.18.3"}
+{"time":"2025-04-26T23:51:48.032745727+08:00","level":"INFO","msg":"created symlink","path":"/data1/lihaobo/tracking/rft/wandb/run-20250426_235148-vto0i5o7/logs/debug-core.log"}
+{"time":"2025-04-26T23:51:48.03593734+08:00","level":"ERROR","msg":"dialing: google: could not find default credentials. See https://cloud.google.com/docs/authentication/external/set-up-adc for more information"}
+{"time":"2025-04-26T23:51:48.044982821+08:00","level":"INFO","msg":"created new stream","id":"vto0i5o7"}
+{"time":"2025-04-26T23:51:48.045023135+08:00","level":"INFO","msg":"stream: started","id":"vto0i5o7"}
+{"time":"2025-04-26T23:51:48.045069497+08:00","level":"INFO","msg":"sender: started","stream_id":{"value":"vto0i5o7"}}
+{"time":"2025-04-26T23:51:48.04504187+08:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"vto0i5o7"}}
+{"time":"2025-04-26T23:51:48.045061063+08:00","level":"INFO","msg":"handler: started","stream_id":{"value":"vto0i5o7"}}
+{"time":"2025-04-26T23:51:48.502482679+08:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2025-04-26T23:51:48.503780858+08:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-04-26T23:51:50.769931884+08:00","level":"INFO","msg":"stream: closing","id":"vto0i5o7"}
+{"time":"2025-04-26T23:51:50.769982593+08:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-04-26T23:51:50.773617119+08:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-04-26T23:51:51.129147152+08:00","level":"WARN","msg":"No job ingredients found, not creating job artifact"}
+{"time":"2025-04-26T23:51:51.129170767+08:00","level":"WARN","msg":"No source type found, not creating job artifact"}
+{"time":"2025-04-26T23:51:51.129176421+08:00","level":"INFO","msg":"sender: sendDefer: no job artifact to save"}
+{"time":"2025-04-26T23:51:52.070403329+08:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-04-26T23:51:52.461572337+08:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"vto0i5o7"}}
+{"time":"2025-04-26T23:51:52.461635509+08:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"vto0i5o7"}}
+{"time":"2025-04-26T23:51:52.461632928+08:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"vto0i5o7"}}
+{"time":"2025-04-26T23:51:52.461803759+08:00","level":"INFO","msg":"stream: closed","id":"vto0i5o7"}

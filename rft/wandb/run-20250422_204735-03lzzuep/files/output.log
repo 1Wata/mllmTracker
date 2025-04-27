@@ -1,0 +1,52 @@
+  0%|                                                                            | 0/500 [00:00<?, ?it/s]Traceback (most recent call last):
+  File "/data1/lihaobo/tracking/rft/src/scripts/run_tracking_debug.py", line 43, in <module>
+    main2()
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 509, in main2
+    main(script_args, training_args, model_args)
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 500, in main
+    trainer.train()
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2243, in train
+    return inner_training_loop(
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2502, in _inner_training_loop
+    batch_samples, num_items_in_batch = self.get_batch_samples(epoch_iterator, num_batches)
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 5190, in get_batch_samples
+    batch_samples += [next(epoch_iterator)]
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/accelerate/data_loader.py", line 566, in __iter__
+    current_batch = next(dataloader_iter)
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 701, in __next__
+    data = self._next_data()
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 757, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 55, in fetch
+    return self.collate_fn(data)
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/data/data_collator.py", line 92, in default_data_collator
+    return torch_default_data_collator(features)
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/data/data_collator.py", line 158, in torch_default_data_collator
+    batch[k] = torch.tensor([f[k] for f in features])
+RuntimeError: Could not infer dtype of PngImageFile
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/scripts/run_tracking_debug.py", line 43, in <module>
+[rank0]:     main2()
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 509, in main2
+[rank0]:     main(script_args, training_args, model_args)
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 500, in main
+[rank0]:     trainer.train()
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2243, in train
+[rank0]:     return inner_training_loop(
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2502, in _inner_training_loop
+[rank0]:     batch_samples, num_items_in_batch = self.get_batch_samples(epoch_iterator, num_batches)
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 5190, in get_batch_samples
+[rank0]:     batch_samples += [next(epoch_iterator)]
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/accelerate/data_loader.py", line 566, in __iter__
+[rank0]:     current_batch = next(dataloader_iter)
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 701, in __next__
+[rank0]:     data = self._next_data()
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/torch/utils/data/dataloader.py", line 757, in _next_data
+[rank0]:     data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/torch/utils/data/_utils/fetch.py", line 55, in fetch
+[rank0]:     return self.collate_fn(data)
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/data/data_collator.py", line 92, in default_data_collator
+[rank0]:     return torch_default_data_collator(features)
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/data/data_collator.py", line 158, in torch_default_data_collator
+[rank0]:     batch[k] = torch.tensor([f[k] for f in features])
+[rank0]: RuntimeError: Could not infer dtype of PngImageFile

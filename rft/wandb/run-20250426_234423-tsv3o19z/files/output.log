@@ -1,0 +1,51 @@
+  0%|                                                                                                                                                     | 0/2 [00:00<?, ?it/s]Traceback (most recent call last):
+Error during processing: Could not make a flat list of images from [{'bytes': None, 'path': '/data1/lihaobo/tracking/rft/tracking_dataset/cropped_images/sample_000006/template_000.jpg'}, {'bytes': None, 'path': '/data1/lihaobo/tracking/rft/tracking_dataset/cropped_images/sample_000006/template_000.jpg'}, {'bytes': None, 'path': '/data1/lihaobo/tracking/rft/tracking_dataset/cropped_images/sample_000006/template_000.jpg'}]
+Formatted Texts: ["<image><image>\nThese are the template frames showing the object 'the white car running on the road'.<image> Please track the object 'the white car running on the road' in the next frame. provide the bounding box [x1, y1, x2, y2]. Use [0, 0, 0, 0] if the object is not visible."]
+Number of flattened images: 3
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 260, in <module>
+    main(script_args, training_args, model_args)
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 251, in main
+    trainer.train()
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2243, in train
+    return inner_training_loop(
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2550, in _inner_training_loop
+    tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 3700, in training_step
+    loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/trainer/grpo_trainer_tracking.py", line 342, in compute_loss
+    raise e
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/trainer/grpo_trainer_tracking.py", line 331, in compute_loss
+    prompt_inputs = self.processing_class(
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/models/qwen2_5_vl/processing_qwen2_5_vl.py", line 123, in __call__
+    image_inputs = self.image_processor(images=images, videos=None, **output_kwargs["images_kwargs"])
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/image_processing_utils.py", line 42, in __call__
+    return self.preprocess(images, **kwargs)
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/models/qwen2_vl/image_processing_qwen2_vl.py", line 352, in preprocess
+    images = make_flat_list_of_images(images)
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/image_utils.py", line 274, in make_flat_list_of_images
+    raise ValueError(f"Could not make a flat list of images from {images}")
+ValueError: Could not make a flat list of images from [{'bytes': None, 'path': '/data1/lihaobo/tracking/rft/tracking_dataset/cropped_images/sample_000006/template_000.jpg'}, {'bytes': None, 'path': '/data1/lihaobo/tracking/rft/tracking_dataset/cropped_images/sample_000006/template_000.jpg'}, {'bytes': None, 'path': '/data1/lihaobo/tracking/rft/tracking_dataset/cropped_images/sample_000006/template_000.jpg'}]
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 260, in <module>
+[rank0]:     main(script_args, training_args, model_args)
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 251, in main
+[rank0]:     trainer.train()
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2243, in train
+[rank0]:     return inner_training_loop(
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2550, in _inner_training_loop
+[rank0]:     tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 3700, in training_step
+[rank0]:     loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/trainer/grpo_trainer_tracking.py", line 342, in compute_loss
+[rank0]:     raise e
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/trainer/grpo_trainer_tracking.py", line 331, in compute_loss
+[rank0]:     prompt_inputs = self.processing_class(
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/models/qwen2_5_vl/processing_qwen2_5_vl.py", line 123, in __call__
+[rank0]:     image_inputs = self.image_processor(images=images, videos=None, **output_kwargs["images_kwargs"])
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/image_processing_utils.py", line 42, in __call__
+[rank0]:     return self.preprocess(images, **kwargs)
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/models/qwen2_vl/image_processing_qwen2_vl.py", line 352, in preprocess
+[rank0]:     images = make_flat_list_of_images(images)
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/image_utils.py", line 274, in make_flat_list_of_images
+[rank0]:     raise ValueError(f"Could not make a flat list of images from {images}")
+[rank0]: ValueError: Could not make a flat list of images from [{'bytes': None, 'path': '/data1/lihaobo/tracking/rft/tracking_dataset/cropped_images/sample_000006/template_000.jpg'}, {'bytes': None, 'path': '/data1/lihaobo/tracking/rft/tracking_dataset/cropped_images/sample_000006/template_000.jpg'}, {'bytes': None, 'path': '/data1/lihaobo/tracking/rft/tracking_dataset/cropped_images/sample_000006/template_000.jpg'}]

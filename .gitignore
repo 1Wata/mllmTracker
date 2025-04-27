@@ -1,12 +1,17 @@
-# Ignore everything first
-*
+# Explicitly ignore specific top-level directories and files
+.vscode/
+data/
+data_upload/
+dataset_interface-2/
 
-# Keep the folders you want to push
-!dataset_interface/
-!rft/
-
-# Keep the .gitignore file itself
-!.gitignore
-
-# --- Add this line to ignore the share_models subfolder within rft ---
+# Ignore the share_models subfolder within rft
 rft/share_models/
+
+# Ignore Python cache files globally (good practice)
+__pycache__/
+*.pyc
+
+# Ignore other common files if needed (e.g., logs, build artifacts)
+# *.log
+# build/
+# dist/

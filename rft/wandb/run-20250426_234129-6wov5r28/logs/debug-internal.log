@@ -1,0 +1,21 @@
+{"time":"2025-04-26T23:41:29.210112801+08:00","level":"INFO","msg":"using version","core version":"0.18.3"}
+{"time":"2025-04-26T23:41:29.210131366+08:00","level":"INFO","msg":"created symlink","path":"/data1/lihaobo/tracking/rft/wandb/run-20250426_234129-6wov5r28/logs/debug-core.log"}
+{"time":"2025-04-26T23:41:29.213589768+08:00","level":"ERROR","msg":"dialing: google: could not find default credentials. See https://cloud.google.com/docs/authentication/external/set-up-adc for more information"}
+{"time":"2025-04-26T23:41:29.225196457+08:00","level":"INFO","msg":"created new stream","id":"6wov5r28"}
+{"time":"2025-04-26T23:41:29.225222291+08:00","level":"INFO","msg":"stream: started","id":"6wov5r28"}
+{"time":"2025-04-26T23:41:29.225247193+08:00","level":"INFO","msg":"sender: started","stream_id":{"value":"6wov5r28"}}
+{"time":"2025-04-26T23:41:29.225235834+08:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"6wov5r28"}}
+{"time":"2025-04-26T23:41:29.22524691+08:00","level":"INFO","msg":"handler: started","stream_id":{"value":"6wov5r28"}}
+{"time":"2025-04-26T23:41:30.641322546+08:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2025-04-26T23:41:30.644898645+08:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-04-26T23:41:32.285882474+08:00","level":"INFO","msg":"stream: closing","id":"6wov5r28"}
+{"time":"2025-04-26T23:41:32.285942943+08:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-04-26T23:41:32.288485063+08:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2025-04-26T23:41:33.193870412+08:00","level":"WARN","msg":"No job ingredients found, not creating job artifact"}
+{"time":"2025-04-26T23:41:33.193906549+08:00","level":"WARN","msg":"No source type found, not creating job artifact"}
+{"time":"2025-04-26T23:41:33.193916282+08:00","level":"INFO","msg":"sender: sendDefer: no job artifact to save"}
+{"time":"2025-04-26T23:41:33.993634615+08:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-04-26T23:41:34.475663838+08:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"6wov5r28"}}
+{"time":"2025-04-26T23:41:34.475716154+08:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"6wov5r28"}}
+{"time":"2025-04-26T23:41:34.475720312+08:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"6wov5r28"}}
+{"time":"2025-04-26T23:41:34.475771001+08:00","level":"INFO","msg":"stream: closed","id":"6wov5r28"}
