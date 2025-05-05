@@ -222,6 +222,21 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
         for _ in range(len(cropped_template_paths)):
             init_user_content.append({"type": "image"})
 
+
+        for idx, template_idx in enumerate(template_indices):
+            if no_crop:
+                # 原始坐标系下的bbox
+                bbox_raw = template_anno_dict.get('bbox', [])[template_idx]
+                if isinstance(bbox_raw, torch.Tensor):
+                    bbox_raw = bbox_raw.tolist()
+                template_bbox = convert_bbox_format(bbox_raw)  # 转换为 [x1, y1, x2, y2] 格式
+                
+                if template_bbox:
+                    bbox_text = f"\nThe bounding box for template frame {idx+1} is: [{int(template_bbox[0])}, {int(template_bbox[1])}, {int(template_bbox[2])}, {int(template_bbox[3])}]."
+                    init_user_content.append({"text": bbox_text})
+            else:
+                # 裁剪模式下不需要添加，因为已经通过裁剪图像隐式传达了目标位置
+                pass
         # 描述物体
         template_text = f"\nThese are the template frames showing the object '{exp_str}'."
         init_user_content.append({"text": template_text})
@@ -414,5 +429,5 @@ if __name__ == "__main__":
     from datasets import load_from_disk
     dataset = load_from_disk(f"{output_dir}/tracking_dataset")
     print("Dataset sample:")
-    print(dataset[4])
+    print(dataset[2])
     print(f"Total samples: {len(dataset)}")
