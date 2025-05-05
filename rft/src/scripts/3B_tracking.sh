@@ -38,7 +38,7 @@ torchrun --nproc_per_node="4" \
     --output_dir ${SAVE_PATH}  \
     --model_name_or_path ${CKPT_PATH} \
     --dataset_name ${DATA_PATH} \
-    --deepspeed ./src/virft/local_scripts/zero3.json \
+    --deepspeed ./src/virft/local_scripts/zero2.json \
     --max_prompt_length 2048 \
     --per_device_train_batch_size 1 \
     --gradient_accumulation_steps 2 \
@@ -52,5 +52,5 @@ torchrun --nproc_per_node="4" \
     --run_name Qwen2_5-VL-3B_GRPO_tracking \
     --save_steps 1000 \
     --save_only_model true \
-    --num_generations 2
+    --num_generations 8
 

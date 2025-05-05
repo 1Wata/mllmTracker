@@ -148,3 +148,43 @@ Reference: Tracking results for 'the white car running on the road':
 Predicted bbox (resized): [0, 137, 75, 202]
 Predicted bbox (original): [0, 247, 127, 364]
 Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-12-42-15-775630 Tracking IoU reward: 0.0 -------------
+Original Size: (720, 1280), Resized Size: (224, 420)
+Model output: <answer>[220,38,226,50]
+Reference: Tracking results for 'basketball being played by a boy in white shirt':
+
+<answer>[384, 233, 480, 327]</answer>
+
+Predicted bbox (resized): [220, 38, 226, 50]
+Predicted bbox (original): [670, 122, 688, 160]
+Ground truth bbox (original): [384, 233, 480, 327]
+------------- 05-12-42-15-775630 Tracking IoU reward: 0.0 -------------
+Original Size: (720, 1280), Resized Size: (224, 420)
+Model output: <answer>[197,40,241,80]
+Reference: Tracking results for 'basketball being played by a boy in white shirt':
+
+<answer>[384, 233, 480, 327]</answer>
+
+Predicted bbox (resized): [197, 40, 241, 80]
+Predicted bbox (original): [600, 128, 734, 257]
+Ground truth bbox (original): [384, 233, 480, 327]
+------------- 05-13-41-33-277228 Tracking IoU reward: 0.0272644872801982 -------------
+Original Size: (720, 1280), Resized Size: (224, 420)
+Model output: <answer>[0, 70, 220, 280]
+Reference: Tracking results for 'basketball being played by a boy in white shirt':
+
+<answer>[384, 233, 480, 327]</answer>
+
+Predicted bbox (resized): [0, 70, 220, 280]
+Predicted bbox (original): [0, 225, 670, 719]
+Ground truth bbox (original): [384, 233, 480, 327]
+------------- 05-13-41-33-277228 Tracking IoU reward: 0.0 -------------
+Original Size: (720, 1280), Resized Size: (224, 420)
+Model output: <answer>[197, 38, 243, 76]
+Reference: Tracking results for 'basketball being played by a boy in white shirt':
+
+<answer>[384, 233, 480, 327]</answer>
+
+Predicted bbox (resized): [197, 38, 243, 76]
+Predicted bbox (original): [600, 122, 740, 244]
+Ground truth bbox (original): [384, 233, 480, 327]

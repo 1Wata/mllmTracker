@@ -51,7 +51,7 @@ from trl.trainer.utils import generate_model_card, get_comet_experiment_url
 
 import copy
 import math
-
+from open_r1.utils.utils import transform_bbox
 
 if is_peft_available():
     from peft import PeftConfig, get_peft_model
@@ -381,7 +381,8 @@ class Qwen25VLGRPOTrainer(Trainer):
             # 使用第一张图像确定该样本的分辨率（假设同一样本内所有图像分辨率相同）
             first_image = image_list_for_sample[0]
             original_width, original_height = first_image.size
-            original_sizes.append((original_height, original_width))
+            # Store as (width, height)
+            original_sizes.append((original_width, original_height))
             
             # 使用smart_resize计算调整后的尺寸
             try:
@@ -392,7 +393,8 @@ class Qwen25VLGRPOTrainer(Trainer):
                     min_pixels=min_pixels,
                     max_pixels=max_pixels
                 )
-                resized_sizes.append((resized_height, resized_width))
+                # Store as (width, height)
+                resized_sizes.append((resized_width, resized_height))
             except ValueError as e:
                 # 处理特殊情况，例如过小的图像或极端宽高比
                 print(f"Warning: {e}. Using fallback resizing method for image size ({original_height}, {original_width}).")
@@ -411,7 +413,8 @@ class Qwen25VLGRPOTrainer(Trainer):
                 resized_width = int(original_width * scale + 0.5)
                 resized_width = math.ceil(resized_width / factor) * factor
                 
-                resized_sizes.append((resized_height, resized_width))
+                # Store as (width, height)
+                resized_sizes.append((resized_width, resized_height))
         
         return original_sizes, resized_sizes
 
@@ -460,8 +463,38 @@ class Qwen25VLGRPOTrainer(Trainer):
         image_counts = [len(sample_images) for sample_images in images_per_sample]
         # --- End: Flatten images and get counts ---
 
+        # original_sizes and resized_sizes are now (W, H)
         original_sizes, resized_sizes = self._calculate_image_sizes(images_per_sample)
 
+
+        for i, prompt_text in enumerate(prompts_text):
+            original_size = original_sizes[i] # (W, H)
+            resized_size = resized_sizes[i]   # (W, H)
+            # 使用正则表达式查找并替换bbox文本
+            import re
+            bbox_pattern = r"bounding box for template frame .+ is: \[(\d+), (\d+), (\d+), (\d+)\]"
+            matches = re.findall(bbox_pattern, prompt_text)
+            
+            for match in matches:
+                x1, y1, x2, y2 = map(int, match)
+                original_bbox = [x1, y1, x2, y2]
+                # transform_bbox from utils expects (W, H), which is now provided correctly
+                resized_bbox = transform_bbox(original_bbox, original_size, resized_size, 'original_to_resized')
+                new_to_old = transform_bbox(resized_bbox, resized_size, original_size, 'resized_to_original')
+                if resized_bbox:
+                    # 创建新的bbox字符串
+                    new_bbox_str = f"[{int(resized_bbox[0])}, {int(resized_bbox[1])}, {int(resized_bbox[2])}, {int(resized_bbox[3])}]"
+                    # 替换原始字符串中的bbox
+                    old_bbox_str = f"[{x1}, {y1}, {x2}, {y2}]"
+                    prompt_text = prompt_text.replace(old_bbox_str, new_bbox_str)
+
+                
+                
+            # 更新prompts_text
+            prompts_text[i] = prompt_text
+        
+        
+        
         # Pass the flat list of images and counts to the processor
         # Check if the processor supports 'image_counts' argument
         processor_signature = inspect.signature(self.processing_class.__call__)
@@ -477,11 +510,8 @@ class Qwen25VLGRPOTrainer(Trainer):
              processor_kwargs['image_counts'] = image_counts # Pass the counts if supported
 
         prompt_inputs = self.processing_class(**processor_kwargs)
-
-
         prompt_inputs = super()._prepare_inputs(prompt_inputs)
 
-        # ... rest of the compute_loss method remains the same ...
 
         # Extract input components
         prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]

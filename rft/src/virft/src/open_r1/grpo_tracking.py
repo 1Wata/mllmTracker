@@ -31,63 +31,6 @@ import numpy as np
 from open_r1.rewards.iou import calculate_iou
 from open_r1.utils.utils import transform_bbox
 
-# --- Start: Define transform_bbox if not available ---
-def transform_bbox(bbox, original_size, resized_size, mode='resized_to_original'):
-    """
-    Transforms bounding box coordinates between original and resized image dimensions.
-
-    Args:
-        bbox (list[int or float]): Bounding box [x1, y1, x2, y2].
-        original_size (tuple[int, int]): Original image size (height, width).
-        resized_size (tuple[int, int]): Resized image size (height, width).
-        mode (str): 'resized_to_original' or 'original_to_resized'.
-
-    Returns:
-        list[int]: Transformed bounding box [x1, y1, x2, y2], or None if input is invalid.
-    """
-    if not bbox or not original_size or not resized_size or len(bbox) != 4:
-        return None # Invalid input
-
-    orig_h, orig_w = original_size
-    res_h, res_w = resized_size
-
-    if orig_h == 0 or orig_w == 0 or res_h == 0 or res_w == 0:
-        return None # Avoid division by zero
-
-    x1, y1, x2, y2 = bbox
-
-    if mode == 'resized_to_original':
-        scale_w = orig_w / res_w
-        scale_h = orig_h / res_h
-        new_x1 = int(x1 * scale_w)
-        new_y1 = int(y1 * scale_h)
-        new_x2 = int(x2 * scale_w)
-        new_y2 = int(y2 * scale_h)
-    elif mode == 'original_to_resized':
-        scale_w = res_w / orig_w
-        scale_h = res_h / orig_h
-        new_x1 = int(x1 * scale_w)
-        new_y1 = int(y1 * scale_h)
-        new_x2 = int(x2 * scale_w)
-        new_y2 = int(y2 * scale_h)
-    else:
-        raise ValueError("Invalid mode specified. Use 'resized_to_original' or 'original_to_resized'.")
-
-    # Clip coordinates to be within image boundaries (using original size for 'r_to_o', resized for 'o_to_r')
-    target_w = orig_w if mode == 'resized_to_original' else res_w
-    target_h = orig_h if mode == 'resized_to_original' else res_h
-
-    new_x1 = max(0, min(new_x1, target_w - 1))
-    new_y1 = max(0, min(new_y1, target_h - 1))
-    new_x2 = max(0, min(new_x2, target_w - 1))
-    new_y2 = max(0, min(new_y2, target_h - 1))
-
-    # Ensure x1 <= x2 and y1 <= y2
-    if new_x1 > new_x2: new_x1, new_x2 = new_x2, new_x1
-    if new_y1 > new_y2: new_y1, new_y2 = new_y2, new_y1
-
-    return [new_x1, new_y1, new_x2, new_y2]
-# --- End: Define transform_bbox ---
 
 @dataclass
 class TrackingGRPOScriptArguments(ScriptArguments):
