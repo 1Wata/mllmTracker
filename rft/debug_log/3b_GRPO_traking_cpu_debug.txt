@@ -1,0 +1,110 @@
+------------- 05-00-26-20-568152 Tracking IoU reward: 0.0 -------------
+Original Size: None, Resized Size: None
+Model output: <answer>[0, 0, 0, 0]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 0, 0, 0]
+Predicted bbox (original): None
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-00-26-20-568152 Tracking IoU reward: 0.0 -------------
+Original Size: None, Resized Size: None
+Model output: <answer>[0, 50, 0, 40]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 50, 0, 40]
+Predicted bbox (original): None
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-00-26-20-569085 Tracking confidence reward: 0.0 -------------
+Original Size: None, Resized Size: None
+Model output: <answer>[0, 0, 0, 0]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 0, 0, 0]
+Predicted bbox (original): None
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-00-26-20-569085 Tracking confidence reward: 0.0 -------------
+Original Size: None, Resized Size: None
+Model output: <answer>[0, 50, 0, 40]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 50, 0, 40]
+Predicted bbox (original): None
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-10-33-19-575513 Tracking IoU reward: 0.0 -------------
+Original Size: (455, 620), Resized Size: (271, 370)
+Model output: <answer>[0, 0, 0, 0]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 0, 0, 0]
+Predicted bbox (original): [0, 0, 0, 0]
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-10-36-45-941224 Tracking IoU reward: 0.0 -------------
+Original Size: (455, 620), Resized Size: (271, 370)
+Model output: <answer>[0, 0, 0, 0]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 0, 0, 0]
+Predicted bbox (original): [0, 0, 0, 0]
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-10-36-45-941224 Tracking IoU reward: -0.4904692386127883 -------------
+Original Size: (455, 620), Resized Size: (271, 370)
+Model output: <answer>[0, 137, 75, 202]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 137, 75, 202]
+Predicted bbox (original): [0, 230, 125, 339]
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-10-48-47-510927 Tracking IoU reward: 0.0 -------------
+Original Size: (455, 620), Resized Size: (271, 370)
+Model output: <answer>[0, 0, 0, 0]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 0, 0, 0]
+Predicted bbox (original): [0, 0, 0, 0]
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-10-48-47-510927 Tracking IoU reward: -0.4904692386127883 -------------
+Original Size: (455, 620), Resized Size: (271, 370)
+Model output: <answer>[0, 137, 75, 202]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 137, 75, 202]
+Predicted bbox (original): [0, 230, 125, 339]
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-10-52-24-436916 Tracking IoU reward: 0.0 -------------
+Original Size: (455, 620), Resized Size: (271, 370)
+Model output: <answer>[0, 0, 0, 0]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 0, 0, 0]
+Predicted bbox (original): [0, 0, 0, 0]
+Ground truth bbox (original): [281, 148, 343, 190]
+------------- 05-10-52-24-436916 Tracking IoU reward: -0.4904692386127883 -------------
+Original Size: (455, 620), Resized Size: (271, 370)
+Model output: <answer>[0, 137, 75, 202]</answer>
+Reference: Tracking results for 'the white car running on the road':
+
+<answer>[281, 148, 343, 190]</answer>
+
+Predicted bbox (resized): [0, 137, 75, 202]
+Predicted bbox (original): [0, 230, 125, 339]
+Ground truth bbox (original): [281, 148, 343, 190]

@@ -23,11 +23,71 @@ from transformers import Qwen2_5_VLForConditionalGeneration
 
 from math_verify import parse, verify
 # from open_r1.trainer import Qwen25VLGRPOTrainer, Qwen25VLGRPOVLLMTrainer
-from open_r1.trainer import Qwen25VLGRPOTrainer
+from open_r1.trainer import Qwen25VLGRPOTrainer, Qwen25VLGRPOTrainerBackup
 from trl import GRPOConfig, GRPOTrainer, ModelConfig, ScriptArguments, TrlParser, get_peft_config
 
 import json
 import numpy as np
+from open_r1.rewards.iou import calculate_iou
+from open_r1.utils.utils import transform_bbox
+
+# --- Start: Define transform_bbox if not available ---
+def transform_bbox(bbox, original_size, resized_size, mode='resized_to_original'):
+    """
+    Transforms bounding box coordinates between original and resized image dimensions.
+
+    Args:
+        bbox (list[int or float]): Bounding box [x1, y1, x2, y2].
+        original_size (tuple[int, int]): Original image size (height, width).
+        resized_size (tuple[int, int]): Resized image size (height, width).
+        mode (str): 'resized_to_original' or 'original_to_resized'.
+
+    Returns:
+        list[int]: Transformed bounding box [x1, y1, x2, y2], or None if input is invalid.
+    """
+    if not bbox or not original_size or not resized_size or len(bbox) != 4:
+        return None # Invalid input
+
+    orig_h, orig_w = original_size
+    res_h, res_w = resized_size
+
+    if orig_h == 0 or orig_w == 0 or res_h == 0 or res_w == 0:
+        return None # Avoid division by zero
+
+    x1, y1, x2, y2 = bbox
+
+    if mode == 'resized_to_original':
+        scale_w = orig_w / res_w
+        scale_h = orig_h / res_h
+        new_x1 = int(x1 * scale_w)
+        new_y1 = int(y1 * scale_h)
+        new_x2 = int(x2 * scale_w)
+        new_y2 = int(y2 * scale_h)
+    elif mode == 'original_to_resized':
+        scale_w = res_w / orig_w
+        scale_h = res_h / orig_h
+        new_x1 = int(x1 * scale_w)
+        new_y1 = int(y1 * scale_h)
+        new_x2 = int(x2 * scale_w)
+        new_y2 = int(y2 * scale_h)
+    else:
+        raise ValueError("Invalid mode specified. Use 'resized_to_original' or 'original_to_resized'.")
+
+    # Clip coordinates to be within image boundaries (using original size for 'r_to_o', resized for 'o_to_r')
+    target_w = orig_w if mode == 'resized_to_original' else res_w
+    target_h = orig_h if mode == 'resized_to_original' else res_h
+
+    new_x1 = max(0, min(new_x1, target_w - 1))
+    new_y1 = max(0, min(new_y1, target_h - 1))
+    new_x2 = max(0, min(new_x2, target_w - 1))
+    new_y2 = max(0, min(new_y2, target_h - 1))
+
+    # Ensure x1 <= x2 and y1 <= y2
+    if new_x1 > new_x2: new_x1, new_x2 = new_x2, new_x1
+    if new_y1 > new_y2: new_y1, new_y2 = new_y2, new_y1
+
+    return [new_x1, new_y1, new_x2, new_y2]
+# --- End: Define transform_bbox ---
 
 @dataclass
 class TrackingGRPOScriptArguments(ScriptArguments):
@@ -36,21 +96,23 @@ class TrackingGRPOScriptArguments(ScriptArguments):
 
     Args:
         reward_funcs (`list[str]`):
-            List of reward functions. Possible values: 'tracking_iou', 'tracking_confidence', 'format'.
+            List of reward functions. Possible values: 'tracking_iou', 'format'.
         max_pixels (`int`):
             Maximum number of pixels for the image.
         min_pixels (`int`):
             Minimum number of pixels for the image.
         frames_per_sequence (`int`):
             Number of frames to use per tracking sequence.
+        use_thinking (`bool`):
+            Whether to use thinking process in model responses.
     """
 
     reward_funcs: list[str] = field(
-        default_factory=lambda: ["tracking_iou", "tracking_confidence", "format"],
-        metadata={"help": "List of reward functions. Possible values: 'tracking_iou', 'tracking_confidence', 'format'"},
+        default_factory=lambda: ["tracking_iou", "format"],
+        metadata={"help": "List of reward functions. Possible values: 'tracking_iou', 'format'"},
     )
     max_pixels: Optional[int] = field(
-        default=12845056,
+        default=102400,
         metadata={"help": "Maximum number of pixels for the image"},
     )
     min_pixels: Optional[int] = field(
@@ -61,107 +123,125 @@ class TrackingGRPOScriptArguments(ScriptArguments):
         default=2, 
         metadata={"help": "Number of frames to use per tracking sequence"},
     )
+    use_thinking: bool = field(
+        default=False,
+        metadata={"help": "Whether to use thinking process in model responses"},
+    )
 
 def extract_single_bbox(response):
-    """从模型响应中提取单个边界框"""
-    start_tag = "<answer>"
-    end_tag = "</answer>"
+    """
+    从模型响应中提取单个边界框，自动适应多种响应格式
     
-    if start_tag not in response:
+    Args:
+        response (str): 模型的响应文本
+        
+    Returns:
+        list: 提取的边界框坐标 [x1, y1, x2, y2]，如果无法提取则返回 None
+    """
+    # 尝试从不同格式中提取内容
+    content_str = None
+    
+    # 检查是否有 thinking/answer 格式
+    thinking_start = "<thinking>"
+    thinking_end = "</thinking>"
+    answer_start = "<answer>"
+    answer_end = "</answer>"
+    
+    # 如果存在 thinking 和 answer 标签
+    if thinking_start in response and answer_start in response:
+        # 提取 answer 部分
+        start_idx = response.find(answer_start) + len(answer_start)
+        end_idx = response.find(answer_end) if answer_end in response else len(response)
+        content_str = response[start_idx:end_idx].strip()
+    
+    # 如果只有 answer 标签
+    elif answer_start in response:
+        start_idx = response.find(answer_start) + len(answer_start)
+        end_idx = response.find(answer_end) if answer_end in response else len(response)
+        content_str = response[start_idx:end_idx].strip()
+    
+    # 如果没有标签，则尝试直接提取
+    else:
+        content_str = response.strip()
+    
+    # 如果没有内容可提取
+    if not content_str:
         return None
     
-    # 提取标签之间的内容
-    start_idx = response.find(start_tag) + len(start_tag)
-    end_idx = response.find(end_tag)
+    # 替换单引号为双引号以兼容JSON格式
+    content_str = content_str.replace("'", '"')
     
-    if end_idx == -1:
-        end_idx = len(response)
-    
-    content_str = response[start_idx:end_idx].strip()
-    
-    # 尝试解析为JSON
-    try:
-        # 替换单引号为双引号以兼容JSON格式
-        content_str = content_str.replace("'", '"')
-        # 处理可能的格式问题
-        content_str = content_str.replace("[", "[").replace("]", "]")
+    # 尝试解析为JSON格式
+    # 方法1: 直接的坐标列表 [x1, y1, x2, y2]
+    if content_str.startswith('[') and content_str.endswith(']'):
+        # 尝试解析为JSON数组
+        import json
         
-        # 支持两种可能的格式：直接的坐标列表或者带有Position键的字典
-        if content_str.startswith('[') and content_str.endswith(']'):
-            try:
-                bbox_data = json.loads(content_str)
-                if isinstance(bbox_data, list):
-                    if len(bbox_data) == 4 and all(isinstance(x, (int, float)) for x in bbox_data):
-                        # 直接返回坐标列表 [x1, y1, x2, y2]
-                        return bbox_data
-                    elif isinstance(bbox_data[0], dict) and 'Position' in bbox_data[0]:
-                        # 返回第一个边界框的Position
-                        return bbox_data[0]['Position']
-            except:
-                # 尝试其他格式解析方法
-                pass
-                
-        # 尝试解析为字典形式 {'Position': [x1, y1, x2, y2]}
+        # 尝试解析整个内容
+        bbox_data = None
+        try:
+            bbox_data = json.loads(content_str)
+        except json.JSONDecodeError:
+            # 如果解析失败，继续尝试下一种方法
+            pass
+        
+        if bbox_data is not None:
+            # 检查是直接的坐标列表还是带有Position键的对象列表
+            if isinstance(bbox_data, list):
+                if len(bbox_data) == 4 and all(isinstance(x, (int, float)) for x in bbox_data):
+                    # 直接返回坐标列表 [x1, y1, x2, y2]
+                    return bbox_data
+                elif bbox_data and isinstance(bbox_data[0], dict) and 'Position' in bbox_data[0]:
+                    # 返回第一个边界框的Position
+                    return bbox_data[0]['Position']
+    
+    # 方法2: 尝试解析为字典形式 {'Position': [x1, y1, x2, y2]}
+    if content_str.startswith('{') and content_str.endswith('}'):
+        import json
+        
+        bbox_dict = None
         try:
             bbox_dict = json.loads(content_str)
-            if isinstance(bbox_dict, dict) and 'Position' in bbox_dict:
-                return bbox_dict['Position']
-        except:
+        except json.JSONDecodeError:
+            # 如果解析失败，继续尝试下一种方法
             pass
-            
-    except Exception as e:
-        pass
         
-    # 如果所有解析都失败，尝试使用正则表达式提取数字列表
-    try:
-        import re
-        # 查找形如 [x, y, x, y] 的模式
-        matches = re.findall(r'\[(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\]', content_str)
-        if matches:
-            # 使用第一个匹配的结果
-            return [int(x) for x in matches[0]]
-    except:
-        pass
-        
+        if bbox_dict is not None and isinstance(bbox_dict, dict) and 'Position' in bbox_dict:
+            return bbox_dict['Position']
+    
+    # 方法3: 使用正则表达式提取数字列表
+    import re
+    matches = re.findall(r'\[(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\]', content_str)
+    if matches:
+        return [int(x) for x in matches[0]]
+    
     return None
 
-def calculate_tracking_iou(bbox1, bbox2):
-    """计算两个边界框之间的IoU"""
-    if bbox1 is None or bbox2 is None:
-        return 0.0
-        
-    x1, y1, x2, y2 = bbox1
-    x1_2, y1_2, x2_2, y2_2 = bbox2
-
-    # 确保坐标有效
-    if x1 > x2: x1, x2 = x2, x1
-    if y1 > y2: y1, y2 = y2, y1
-    if x1_2 > x2_2: x1_2, x2_2 = x2_2, x1_2
-    if y1_2 > y2_2: y1_2, y2_2 = y2_2, y1_2
-
-    # 计算交集
-    xi1 = max(x1, x1_2)
-    yi1 = max(y1, y1_2)
-    xi2 = min(x2, x2_2)
-    yi2 = min(y2, y2_2)
+def extract_thinking_and_answer(response):
+    """从模型响应中提取思考过程和最终答案"""
+    thinking = None
+    answer = None
     
-    if xi2 <= xi1 or yi2 <= yi1:
-        return 0.0
+    # 提取思考部分
+    thinking_start_tag = "<thinking>"
+    thinking_end_tag = "</thinking>"
+    if thinking_start_tag in response and thinking_end_tag in response:
+        thinking_start_idx = response.find(thinking_start_tag) + len(thinking_start_tag)
+        thinking_end_idx = response.find(thinking_end_tag)
+        if thinking_end_idx > thinking_start_idx:
+            thinking = response[thinking_start_idx:thinking_end_idx].strip()
     
-    intersection_area = (xi2 - xi1) * (yi2 - yi1)
+    # 提取答案部分
+    answer_start_tag = "<answer>"
+    answer_end_tag = "</answer>"
+    if answer_start_tag in response:
+        answer_start_idx = response.find(answer_start_tag) + len(answer_start_tag)
+        answer_end_idx = response.find(answer_end_tag)
+        if answer_end_idx == -1:
+            answer_end_idx = len(response)
+        answer = response[answer_start_idx:answer_end_idx].strip()
     
-    # 计算并集
-    area1 = (x2 - x1) * (y2 - y1)
-    area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
-    
-    if area1 <= 0 or area2 <= 0:
-        return 0.0
-
-    union_area = area1 + area2 - intersection_area
-    
-    # 计算IoU
-    iou = intersection_area / union_area
-    return iou
+    return thinking, answer
 
 def calculate_tracking_consistency(bbox_history):
     """计算追踪的一致性分数，基于运动的平滑度"""
@@ -196,113 +276,98 @@ def calculate_tracking_consistency(bbox_history):
     return consistency
 
 def tracking_reward_iou(completions, solution, **kwargs):
-    """基于IoU的追踪奖励函数"""
-    contents = [completion[0]["content"] for completion in completions]
+    # Determine if completions are conversational or plain strings
+    if isinstance(completions[0], list) and isinstance(completions[0][0], dict) and "content" in completions[0][0]:
+        contents = [completion[0]["content"] for completion in completions]
+    elif isinstance(completions[0], str):
+        contents = completions
+    else:
+        raise ValueError("Unsupported completion format")
+
+    # Get use_thinking from kwargs if passed, otherwise default (e.g., False)
+    use_thinking = kwargs.get('use_thinking', False) # Default to False if not provided
+
     rewards = []
     current_time = datetime.now().strftime("%d-%H-%M-%S-%f")
-    
-    for content, sol in zip(contents, solution):
+
+    # Get size information from kwargs (expecting lists)
+    original_sizes = kwargs.get('original_size', [None] * len(contents))
+    resized_sizes = kwargs.get('resized_size', [None] * len(contents))
+
+    for i, (content, sol) in enumerate(zip(contents, solution)):
         reward = 0.0
-        
-        try:
-            # 从模型输出中提取边界框
-            bbox_pred = extract_single_bbox(content)
-            # 从参考答案中提取边界框
-            bbox_gt = extract_single_bbox(sol)
-            
-            if bbox_pred and bbox_gt:
-                # 计算IoU作为奖励
-                reward = calculate_tracking_iou(bbox_pred, bbox_gt)
-            
-        except Exception as e:
-            pass
-        
+        original_size = original_sizes[i]
+        resized_size = resized_sizes[i]
+
+        # 从模型输出中提取边界框 (in resized coordinates)
+        bbox_pred_resized = extract_single_bbox(content)
+        # 从参考答案中提取边界框 (assumed in original coordinates)
+        bbox_gt_orig = extract_single_bbox(sol)
+
+        # Transform predicted bbox to original coordinates if sizes are available
+        bbox_pred_orig = None
+        if bbox_pred_resized and original_size and resized_size:
+            bbox_pred_orig = transform_bbox(bbox_pred_resized, original_size, resized_size, 'resized_to_original')
+
+        # Calculate IoU using boxes in the *same* (original) coordinate system
+        if bbox_pred_orig and bbox_gt_orig:
+            reward = calculate_iou(bbox_pred_orig, bbox_gt_orig)
+        elif bbox_pred_resized and bbox_gt_orig and (not original_size or not resized_size):
+             # Log if transformation couldn't happen due to missing size info
+             print(f"Debug IoU: Calc skipped due to missing size info. Pred(res):{bbox_pred_resized}, GT(orig):{bbox_gt_orig}")
+        elif bbox_pred_resized and bbox_gt_orig and not bbox_pred_orig:
+             # Log if transformation failed but extraction worked
+             print(f"Debug IoU: Calc skipped due to transform failure. Pred(res):{bbox_pred_resized}, GT(orig):{bbox_gt_orig}, Orig:{original_size}, Res:{resized_size}")
+
         rewards.append(reward)
-        
 
         if os.getenv("DEBUG_MODE") == "true":
             log_path = os.getenv("LOG_PATH")
             with open(log_path, "a") as f:
                 f.write(f"------------- {current_time} Tracking IoU reward: {reward} -------------\n")
+                f.write(f"Original Size: {original_size}, Resized Size: {resized_size}\n")
                 f.write(f"Model output: {content}\n")
                 f.write(f"Reference: {sol}\n")
-                f.write(f"Predicted bbox: {bbox_pred}\n")
-                f.write(f"Ground truth bbox: {bbox_gt}\n")
-                
+                f.write(f"Predicted bbox (resized): {bbox_pred_resized}\n")
+                f.write(f"Predicted bbox (original): {bbox_pred_orig}\n") # Log transformed box
+                f.write(f"Ground truth bbox (original): {bbox_gt_orig}\n")
+
     return rewards
 
-def tracking_reward_confidence(completions, solution, tracking_history=None, **kwargs):
-    """基于置信度和一致性的追踪奖励函数"""
-    contents = [completion[0]["content"] for completion in completions]
-    rewards = []
-    current_time = datetime.now().strftime("%d-%H-%M-%S-%f")
-    
-    for content, sol in zip(contents, solution):
-        reward = 0.0
-        
 
-        bbox_pred = extract_single_bbox(content)
-        bbox_gt = extract_single_bbox(sol)
-        
-        if bbox_pred and bbox_gt:
-            # 基本IoU奖励
-            iou_score = calculate_tracking_iou(bbox_pred, bbox_gt)
-            
-            # 如果有追踪历史，计算一致性奖励
-            consistency_score = 0.0
-            if tracking_history and isinstance(tracking_history, list) and len(tracking_history) > 0:
-                # 将当前预测添加到历史记录中进行一致性评估
-                history_with_current = tracking_history + [bbox_pred]
-                consistency_score = calculate_tracking_consistency(history_with_current)
-            
-            # 结合IoU和一致性的奖励
-            reward = 0.7 * iou_score + 0.3 * consistency_score
 
-            
-        rewards.append(reward)
-        
-        # 调试日志
-        if os.getenv("DEBUG_MODE") == "true":
-            log_path = os.getenv("LOG_PATH")
-            with open(log_path, "a") as f:
-                f.write(f"------------- {current_time} Tracking confidence reward: {reward} -------------\n")
-                f.write(f"Model output: {content}\n")
-                f.write(f"Reference: {sol}\n")
-                f.write(f"Predicted bbox: {bbox_pred}\n")
-                f.write(f"Ground truth bbox: {bbox_gt}\n")
-                if tracking_history:
-                    f.write(f"Tracking history: {tracking_history}\n")
-                
-    return rewards
+def format_reward(completions, solution, **kwargs):
+    """检查完成的格式是否正确的奖励函数 (Unified interface)"""
+    # Determine if completions are conversational or plain strings
+    if isinstance(completions[0], list) and isinstance(completions[0][0], dict) and "content" in completions[0][0]:
+        contents = [completion[0]["content"] for completion in completions]
+    elif isinstance(completions[0], str):
+        contents = completions
+    else:
+        raise ValueError("Unsupported completion format")
 
-def format_reward(completions, **kwargs):
-    """检查完成的格式是否正确的奖励函数"""
-    pattern = r"<answer>\s*(\[.*?\]|\{.*?\})\s*</answer>"
-    completion_contents = [completion[0]["content"] for completion in completions]
-    matches = [re.search(pattern, content, re.DOTALL) is not None for content in completion_contents]
+    # Pattern depends on whether thinking is used or not
+    use_thinking = kwargs.get('use_thinking', False)
+    if use_thinking:
+        # Expect <thinking>...</thinking><answer>...</answer>
+        pattern = r"<thinking>.*?</thinking>\s*<answer>\s*(\[.*?\]|\{.*?\})\s*</answer>"
+    else:
+        # Expect <answer>...</answer>
+        pattern = r"<answer>\s*(\[.*?\]|\{.*?\})\s*</answer>"
+
+    matches = [re.search(pattern, content, re.DOTALL) is not None for content in contents]
     return [1.0 if match else 0.0 for match in matches]
 
 # 奖励函数注册表
 reward_funcs_registry = {
     "tracking_iou": tracking_reward_iou,
-    "tracking_confidence": tracking_reward_confidence,
+    # "tracking_confidence": tracking_reward_confidence,
     "format": format_reward,
 }
 
-
-
-TRACKING_SYSTEM_PROMPT = (
-    "You are a professional visual object tracking assistant. Your task is to track specified target objects in a video sequence. "
-    "The user will provide an initial frame with the target's bounding box, then you need to find the target's new position in subsequent frames. "
-    "Please directly return the target's bounding box coordinates in the format [x1, y1, x2, y2], where (x1, y1) is the top-left coordinate and (x2, y2) is the bottom-right coordinate. "
-    "Your answer should be wrapped in <answer>[x1, y1, x2, y2]</answer> tags."
-)
-
-
-
 def main(script_args, training_args, model_args):
     # 获取奖励函数
-    script_args.reward_funcs = ['tracking_iou', 'tracking_confidence', 'format']
+    script_args.reward_funcs = ['tracking_iou', 'format']
     reward_funcs = [reward_funcs_registry[func] for func in script_args.reward_funcs]
 
     # from data_converter import create_dataset, load_image
@@ -325,6 +390,7 @@ def main(script_args, training_args, model_args):
     # 确定使用哪个Trainer类
     # trainer_cls = Qwen25VLGRPOVLLMTrainer if training_args.use_vllm else Qwen25VLGRPOTrainer
     trainer_cls = Qwen25VLGRPOTrainer
+    # trainer_cls = Qwen25VLGRPOTrainerBackup
     print("using trainer:", trainer_cls.__name__)
 
     

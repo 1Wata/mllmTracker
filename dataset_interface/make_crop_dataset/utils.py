@@ -2,7 +2,14 @@ import random
 from PIL import Image
 from PIL import ImageDraw
 
-
+def is_bbox_fully_visible(bbox, img_width, img_height):
+    """检查边界框 [x1, y1, x2, y2] 是否完全在图像范围内。"""
+    if not (bbox and len(bbox) == 4):
+        return False
+    x1, y1, x2, y2 = bbox
+    if x1 >= x2 or y1 >= y2:
+        return False
+    return x1 >= 0 and y1 >= 0 and x2 <= img_width and y2 <= img_height
 
 def convert_bbox_format(bbox):
     """

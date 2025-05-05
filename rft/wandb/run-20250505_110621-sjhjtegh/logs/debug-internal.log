@@ -1,0 +1,13 @@
+{"time":"2025-05-05T11:06:21.306894748+08:00","level":"INFO","msg":"using version","core version":"0.18.3"}
+{"time":"2025-05-05T11:06:21.306942683+08:00","level":"INFO","msg":"created symlink","path":"/data1/lihaobo/tracking/rft/wandb/run-20250505_110621-sjhjtegh/logs/debug-core.log"}
+{"time":"2025-05-05T11:06:21.311647398+08:00","level":"ERROR","msg":"dialing: google: could not find default credentials. See https://cloud.google.com/docs/authentication/external/set-up-adc for more information"}
+{"time":"2025-05-05T11:06:21.323051304+08:00","level":"INFO","msg":"created new stream","id":"sjhjtegh"}
+{"time":"2025-05-05T11:06:21.323084791+08:00","level":"INFO","msg":"stream: started","id":"sjhjtegh"}
+{"time":"2025-05-05T11:06:21.323119039+08:00","level":"INFO","msg":"handler: started","stream_id":{"value":"sjhjtegh"}}
+{"time":"2025-05-05T11:06:21.323104444+08:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"sjhjtegh"}}
+{"time":"2025-05-05T11:06:21.3231217+08:00","level":"INFO","msg":"sender: started","stream_id":{"value":"sjhjtegh"}}
+{"time":"2025-05-05T11:06:21.776349018+08:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2025-05-05T11:06:21.777385267+08:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-05-05T11:06:33.499435861+08:00","level":"INFO","msg":"stream: closing","id":"sjhjtegh"}
+{"time":"2025-05-05T11:06:33.49949989+08:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2025-05-05T11:06:33.502810797+08:00","level":"INFO","msg":"Stopped system monitor"}

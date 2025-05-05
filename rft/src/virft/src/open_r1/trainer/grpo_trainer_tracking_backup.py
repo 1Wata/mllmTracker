@@ -251,8 +251,8 @@ class Qwen25VLGRPOTrainer(Trainer):
         super().__init__(
             model=model,
             args=args,
-            data_collator=custom_tracking_data_collator,
-            # data_collator=data_collator,
+            # data_collator=custom_tracking_data_collator,
+            data_collator=data_collator,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             processing_class=processing_class,

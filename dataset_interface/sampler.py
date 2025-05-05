@@ -55,7 +55,7 @@ class TrackingSampler(torch.utils.data.Dataset):
         train_cls: bool = False,
         pos_prob: float = 0.5,
         # max_prev_template_frames: int = 3,  # 修改为最大前序帧数，随机采样0-3个前序帧
-        unify_out_format: bool = True,
+        unify_out_format: bool = False,
     ):
         """
         args:
@@ -93,10 +93,10 @@ class TrackingSampler(torch.utils.data.Dataset):
         self.processing = processing
         self.frame_sample_mode = frame_sample_mode
 
-        if self.num_search_frames != 1:
-            raise ValueError(
-                "num_search_frames must be 1 for the desired modification."
-            )
+        # if self.num_search_frames != 1:
+        #     raise ValueError(
+        #         "num_search_frames must be 1 for the desired modification."
+        #     )
 
     def __len__(self):
         return self.samples_per_epoch
@@ -187,16 +187,20 @@ class TrackingSampler(torch.utils.data.Dataset):
                     
                     # 设置模板帧为基准帧
                     # template_frame_ids = base_frame_id
-                    template_frame_ids = self._sample_visible_ids(
-                        visible,
-                        num_ids=self.num_template_frames - 1,  # 采样num_template_frames-1个前序帧
-                        min_id=base_frame_id[0] - self.max_gap - gap_increase,
-                        max_id=base_frame_id[0] - 1,  # 确保前序帧在基准帧之前
-                    )
-                    if template_frame_ids is None:
-                        gap_increase += 5
-                        continue
-                    template_frame_ids = template_frame_ids + base_frame_id
+                    if self.num_template_frames > 1:
+                        template_frame_ids = self._sample_visible_ids(
+                            visible,
+                            num_ids=self.num_template_frames - 1,  # 采样num_template_frames-1个前序帧
+                            min_id=base_frame_id[0] - self.max_gap - gap_increase,
+                            max_id=base_frame_id[0] - 1,  # 确保前序帧在基准帧之前
+                            allow_invisible=False
+                        )
+                        if template_frame_ids is None:
+                            gap_increase += 5
+                            continue
+                        template_frame_ids = template_frame_ids + base_frame_id
+                    else:
+                        template_frame_ids = base_frame_id
                     
                     gap = 50
                     # gap = self.num_template_frames + 1
@@ -318,6 +322,10 @@ class TrackingSampler(torch.utils.data.Dataset):
             else:
                 template_frame_ids = []  # 无模板帧
 
+
+
+
+###########################################################################################################
         if self.unify_out_format:
             # Validate that search_frame_ids come after template_frame_ids (causal logic)
 

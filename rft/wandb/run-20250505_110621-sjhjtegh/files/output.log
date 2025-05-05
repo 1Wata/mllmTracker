@@ -1,0 +1,33 @@
+  0%|                                                                                                                                                                                                             | 0/6 [00:00<?, ?it/s]Traceback (most recent call last):
+Invalidate trace cache @ step 0 and module 1746: cache has only 0 modules
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 424, in <module>
+    main(script_args, training_args, model_args)
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 413, in main
+    trainer.train()
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2243, in train
+    return inner_training_loop(
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2550, in _inner_training_loop
+    tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
+  File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 3700, in training_step
+    loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/trainer/grpo_tracker_trainer.py", line 529, in compute_loss
+    output_reward_func = reward_func(
+  File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 326, in tracking_reward_iou
+    with open(log_path, "a") as f:
+FileNotFoundError: [Errno 2] No such file or directory: './logs/3b_GRPO_traking.txt'
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 424, in <module>
+[rank0]:     main(script_args, training_args, model_args)
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 413, in main
+[rank0]:     trainer.train()
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2243, in train
+[rank0]:     return inner_training_loop(
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 2550, in _inner_training_loop
+[rank0]:     tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
+[rank0]:   File "/home/lihaobo/miniconda3/envs/track/lib/python3.10/site-packages/transformers/trainer.py", line 3700, in training_step
+[rank0]:     loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/trainer/grpo_tracker_trainer.py", line 529, in compute_loss
+[rank0]:     output_reward_func = reward_func(
+[rank0]:   File "/data1/lihaobo/tracking/rft/src/virft/src/open_r1/grpo_tracking.py", line 326, in tracking_reward_iou
+[rank0]:     with open(log_path, "a") as f:
+[rank0]: FileNotFoundError: [Errno 2] No such file or directory: './logs/3b_GRPO_traking.txt'

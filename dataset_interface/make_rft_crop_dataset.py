@@ -9,22 +9,13 @@ import torch
 import shutil
 from datasets import Dataset
 from utils.utils import normalize_bbox_xyhw
-from make_crop_dataset.utils import crop_and_pad_template, crop_and_pad_search, jitter_bbox, convert_bbox_format
+from make_crop_dataset import crop_and_pad_template, crop_and_pad_search, jitter_bbox, convert_bbox_format, is_bbox_fully_visible
 
-def is_bbox_fully_visible(bbox, img_width, img_height):
-    """检查边界框 [x1, y1, x2, y2] 是否完全在图像范围内。"""
-    if not (bbox and len(bbox) == 4):
-        return False
-    x1, y1, x2, y2 = bbox
-    if x1 >= x2 or y1 >= y2:
-        return False
-    return x1 >= 0 and y1 >= 0 and x2 <= img_width and y2 <= img_height
 
 def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_turn_tracking_dataset_cropped",
-                                          template_frames=1, scale=2.0, search_scale=4.0, resize=320):
+                                          template_frames=1, scale=2.0, search_scale=4.0, resize=320, no_crop=False):
     """
-    构建一个使用裁剪图像的一轮跟踪数据集。
-    与build_rft_dataset-oneturn相同的格式，但使用裁剪的图像。
+    构建一个跟踪数据集，可选是否使用裁剪图像。
     
     Args:
         pytorch_dataset: PyTorch数据集实例
@@ -33,15 +24,19 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
         scale: 模板帧裁剪的缩放因子
         search_scale: 搜索帧裁剪的缩放因子
         resize: 裁剪后图像的尺寸
+        no_crop: 是否不裁剪图像，直接使用原始图像路径
     """
     # 创建输出目录
     os.makedirs(output_dir, exist_ok=True)
-    cropped_images_base_dir = os.path.join(output_dir, "cropped_images")
-    os.makedirs(cropped_images_base_dir, exist_ok=True)
+    
+    # 只有在需要裁剪时才创建裁剪图像目录
+    cropped_images_base_dir = None
+    if not no_crop:
+        cropped_images_base_dir = os.path.join(output_dir, "cropped_images")
+        os.makedirs(cropped_images_base_dir, exist_ok=True)
     
     # 用于存储数据集样本的列表
     all_samples = []
-    
     skipped_count = 0
     processed_count = 0
     
@@ -53,67 +48,96 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
         data_len = len(pytorch_dataset)
         print(f"Processing all {data_len} samples in the dataset.")
     
-    # 处理每个样本
-    for i in tqdm(range(data_len), desc="Building One-turn Dataset with Cropped Images"):
-        try:
-            sample = pytorch_dataset[i]
+    # 辅助函数：安全删除目录
+    def safe_remove_dir(dir_path):
+        if os.path.exists(dir_path):
+            try:
+                shutil.rmtree(dir_path)
+                print(f"Removed directory: {dir_path}")
+            except OSError as e:
+                print(f"Error removing directory {dir_path}: {e}")
+    
+    for i in tqdm(range(data_len), desc="Building One-turn Dataset" + (" with Original Images" if no_crop else " with Cropped Images")):
+        # 只有在需要裁剪时才创建样本目录
+        sample_dir = None
+        if not no_crop:
+            sample_dir = os.path.join(cropped_images_base_dir, f"sample_{i:06d}")
+            os.makedirs(sample_dir, exist_ok=True)
+        
+        sample = pytorch_dataset[i]
+        
+        template_frame_paths = sample.get("template_images", [])
+        template_anno_dict = sample.get("template_anno", {})
+        search_frame_paths = sample.get("search_images", [])
+        search_anno_dict = sample.get("search_anno", {})
+        dataset_name = sample.get("dataset_name", "unknown")
+        exp_str = sample.get("exp_str", "object")
+        
+        if exp_str.endswith((" ", "\n", ".")):
+            exp_str = exp_str[:-1]
+        
+        # 检查序列是否有足够的帧
+        if len(template_frame_paths) < template_frames or len(search_frame_paths) < 1:
+            if not no_crop:
+                safe_remove_dir(sample_dir)
+            skipped_count += 1
+            continue
+        
+        # 获取有效帧列表
+        template_valid_list = template_anno_dict.get('valid', [True] * len(template_frame_paths))
+        search_valid_list = search_anno_dict.get('valid', [True] * len(search_frame_paths))
+        
+        # --- 组合模板帧和搜索帧 ---
+        frame_paths = template_frame_paths + search_frame_paths
+        num_frames = len(frame_paths)
+        
+        # 组合标注信息
+        annotations_dict = {
+            'bbox': template_anno_dict.get('bbox', []) + search_anno_dict.get('bbox', []),
+            'visible': template_valid_list + search_valid_list
+        }
+        
+        if no_crop:
+            # 不裁剪时直接使用原始图像路径和边界框
+            template_indices = list(range(min(template_frames, len(template_frame_paths))))
+            search_indices = list(range(len(template_frame_paths), num_frames))
             
-            frame_paths = sample.get("images")
-            annotations_dict = sample.get("anno")
-            dataset_name = sample.get("dataset_name", "unknown")
-            exp_str = sample.get("exp_str", f"sequence_{i}")
-            if exp_str.endswith((" ", "\n", ".")):
-                exp_str = exp_str[:-1]
+            # 使用原始模板帧路径
+            cropped_template_paths = [template_frame_paths[idx] for idx in template_indices]
             
-            # 检查序列是否有足够的帧
-            num_frames = len(frame_paths)
-            if num_frames < template_frames + 1:
-                skipped_count += 1
-                continue
+            # 使用原始搜索帧路径
+            cropped_search_paths = [frame_paths[idx] for idx in search_indices]
             
-            # 获取有效帧列表
-            valid_list = annotations_dict.get('valid', [True] * num_frames)
+            # 使用原始边界框
+            cropped_search_bboxes = []
+            for search_idx in search_indices:
+                bbox_raw = annotations_dict['bbox'][search_idx]
+                bbox_raw = bbox_raw.tolist() if isinstance(bbox_raw, torch.Tensor) else bbox_raw
+                search_bbox = convert_bbox_format(bbox_raw)  # 转换为 [x1, y1, x2, y2] 格式
+                cropped_search_bboxes.append(search_bbox)
             
+        else:
+            # 裁剪模式下的原有处理逻辑
             # --- 获取所有帧的原始数据 ---
             all_bboxes_orig_raw = []
             all_frame_dims = []
-            skip_sample = False
             
             for frame_idx, frame_path in enumerate(frame_paths):
-                try:
-                    with Image.open(frame_path) as img:
-                        img_w, img_h = img.size
-                        all_frame_dims.append((img_w, img_h))
-                    
-                    bbox_raw = annotations_dict['bbox'][frame_idx].tolist() if isinstance(annotations_dict['bbox'][frame_idx], torch.Tensor) else annotations_dict['bbox'][frame_idx]
-                    bbox = convert_bbox_format(bbox_raw)  # [x1, y1, x2, y2]
-                    
-                    if not is_bbox_fully_visible(bbox, img_w, img_h):
-                        skip_sample = True
-                        break
-                    
-                    all_bboxes_orig_raw.append(bbox_raw)
-                except Exception as e:
-                    print(f"Error processing frame {frame_idx} for sample {i}: {e}")
-                    skip_sample = True
-                    break
-            
-            if skip_sample:
-                skipped_count += 1
-                continue
-            
-            # --- 创建样本目录 ---
-            sample_dir = os.path.join(cropped_images_base_dir, f"sample_{i:06d}")
-            os.makedirs(sample_dir, exist_ok=True)
+                with Image.open(frame_path) as img:
+                    img_w, img_h = img.size
+                    all_frame_dims.append((img_w, img_h))
+                
+                bbox_raw = annotations_dict['bbox'][frame_idx].tolist() if isinstance(annotations_dict['bbox'][frame_idx], torch.Tensor) else annotations_dict['bbox'][frame_idx]
+                convert_bbox_format(bbox_raw)  # 检查边界框格式是否有效
+                all_bboxes_orig_raw.append(bbox_raw)
             
             # --- 处理模板帧 ---
-            template_indices = list(range(template_frames))
+            template_indices = list(range(min(template_frames, len(template_frame_paths))))
             template_bboxes_orig = [convert_bbox_format(all_bboxes_orig_raw[idx]) for idx in template_indices]
             template_bboxes_jittered = [jitter_bbox(bbox, jitter_scale=0.05) for bbox in template_bboxes_orig]
             
             cropped_template_paths = []
             for t_idx, template_idx in enumerate(template_indices):
-
                 cropped_template = crop_and_pad_template(
                     frame_paths[template_idx], 
                     template_bboxes_jittered[t_idx], 
@@ -124,24 +148,19 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
                 template_save_path = os.path.join(sample_dir, template_filename)
                 cropped_template.save(template_save_path)
                 cropped_template_paths.append(template_save_path)
-
-            
-            if skip_sample:
-                skipped_count += 1
-                continue
             
             # --- 处理所有搜索帧 (除了模板帧) ---
-            search_indices = [idx for idx in range(num_frames) if idx not in template_indices]
+            search_indices = [idx for idx in range(num_frames) if idx not in template_indices and idx >= len(template_frame_paths)]
             cropped_search_paths = []
             cropped_search_bboxes = []
-            skip_sample_due_to_error = False # <--- 新增标志：标记样本是否因错误跳过
-
+            
             reference_bbox_for_search_crop = template_bboxes_jittered[0]
-
+            
             for search_idx in search_indices:
-                try:
-                    search_bbox_orig = convert_bbox_format(all_bboxes_orig_raw[search_idx])
+                search_bbox_orig = convert_bbox_format(all_bboxes_orig_raw[search_idx])
 
+                try:
+                    # 只保留这里的try-except，因为crop_and_pad_search函数中可能会raise error
                     cropped_search_img, search_bbox_new, crop_region, _ = crop_and_pad_search(
                         frame_paths[search_idx],
                         reference_bbox_for_search_crop,
@@ -150,138 +169,108 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
                         resize=resize
                     )
 
-                    search_filename = f"search_{search_idx:03d}.jpg"
+                    search_filename = f"search_{search_idx - len(template_frame_paths):03d}.jpg"
                     search_save_path = os.path.join(sample_dir, search_filename)
                     cropped_search_img.save(search_save_path)
 
                     cropped_search_paths.append(search_save_path)
                     cropped_search_bboxes.append(search_bbox_new)
                 except Exception as e:
-                    print(f"Error processing search frame {search_idx} for sample {i}: {e}. Skipping sample.")
-                    skip_sample_due_to_error = True # <--- 设置错误标志
-                    break # <--- 退出搜索帧循环
+                    print(f"Warning: Error processing search frame {search_idx} for sample {i}: {e}")
+                    continue  # 跳过这个搜索帧，继续处理下一个
 
-            # --- 新增：检查是否因处理错误需要跳过 ---
-            if skip_sample_due_to_error:
-                try:
-                    shutil.rmtree(sample_dir)
-                    print(f"Removed directory due to processing error: {sample_dir}")
-                except OSError as e:
-                    print(f"Error removing directory {sample_dir} after processing error: {e}")
-                skipped_count += 1
-                continue # <--- 跳到下一个样本
-
-            # --- 修改：检查是否没有成功处理任何搜索帧 ---
-            if not cropped_search_paths:
-                # 如果没有成功处理任何搜索帧（可能是因为上面break了，或者一开始就没成功）
-                print(f"Skipping sample {i} because no search frames were successfully processed.")
-                try:
-                    # 确保清理目录
-                    shutil.rmtree(sample_dir)
-                    print(f"Removed directory as no search frames were processed: {sample_dir}")
-                except OSError as e:
-                    print(f"Error removing directory {sample_dir} when no search frames processed: {e}")
-                skipped_count += 1
-                continue # <--- 跳到下一个样本
-
-
-
-            image_paths_for_sample = cropped_template_paths + cropped_search_paths
-
-            # 构建用户提示
-            init_user_content = []
-
-            # 添加模板帧
-            for _ in range(template_frames):
-                init_user_content.append({"type": "image"})
-
-            # 修改：移除模板帧的边界框信息，只简单描述物体
-            template_text = f"\nThese are the template frames showing the object '{exp_str}'."
-            init_user_content.append({"text": template_text})
-
-            # 添加所有搜索帧
-            for _ in range(len(cropped_search_paths)):
-                init_user_content.append({"type": "image"})
-
-            # 添加跟踪指令，使用[x1, y1, x2, y2]格式
-            tracking_instruction = f" Please track the object '{exp_str}' in the next frame. "
-            tracking_instruction += "provide the bounding box [x1, y1, x2, y2]. "
-            tracking_instruction += "Use [0, 0, 0, 0] if the object is not visible."
-            init_user_content.append({"text": tracking_instruction})
-
-
-            init_user_msg = {"role": "user", "content": init_user_content}
-            prompt_messages = [init_user_msg]
-
-            # 构建解决方案（仅包含搜索帧的跟踪结果）
-            solution = f"Tracking results for '{exp_str}':\n\n"
-            any_search_invisible = False # <--- 初始化标志
-
-            # 保持不变：只包含搜索帧结果，直接使用裁剪后的坐标
-            temp_solution_lines = [] # <--- 临时存储solution行
-            search_indices_processed = search_indices[:len(cropped_search_bboxes)] # 确保索引和bbox对齐
-            for idx, (search_idx, search_bbox) in enumerate(zip(search_indices_processed, cropped_search_bboxes)):
-                # 检查原始注释中的可见性标志
-                # 注意：这里假设 annotations_dict['visible'] 的长度与 num_frames 一致
-                # 如果 annotations_dict['visible'] 可能不存在或长度不匹配，需要更健壮的处理
-                visibility_list = annotations_dict.get('visible', [True] * num_frames)
-                if search_idx >= len(visibility_list):
-                     # 处理索引越界的情况，例如将其视为不可见
-                     print(f"Warning: search_idx {search_idx} out of bounds for visibility list (len {len(visibility_list)}) for sample {i}. Treating as invisible.")
-                     search_visible = False
-                else:
-                     search_visible = visibility_list[search_idx]
-
-
-                if search_visible:
-                    # 直接使用裁剪后的边界框坐标，不需要normalize
-                    temp_solution_lines.append(f"[{int(search_bbox[0])}, {int(search_bbox[1])}, {int(search_bbox[2])}, {int(search_bbox[3])}]\n")
-                else:
-                    temp_solution_lines.append(f"[0, 0, 0, 0]\n")
-                    any_search_invisible = True # <--- 如果有不可见帧，设置标志
-
-            # --- 修改：检查是否有不可见的搜索帧 ---
-            if any_search_invisible:
-                print(f"Skipping sample {i} because it contains invisible search frames.")
-                # 删除已保存的图像和目录
-                try:
-                    shutil.rmtree(sample_dir)
-                    # --- 修改日志 ---
-                    print(f"[Invisibility Check] Successfully removed directory: {sample_dir}")
-                except OSError as e:
-                     # --- 修改日志 ---
-                    print(f"[Invisibility Check] Error removing directory {sample_dir}: {e}")
-                skipped_count += 1
-                continue # <--- 跳到下一个样本
-
-            # --- 如果所有搜索帧都可见，则完成solution字符串 ---
-            solution += "".join(temp_solution_lines)
-
-            # 创建样本
-            sample_data = {
-                "image": image_paths_for_sample,
-                "problem": TRACKING_SYSTEM_PROMPT,
-                "solution": solution,
-                "prompt": prompt_messages
-            }
-
-            all_samples.append(sample_data)
-            processed_count += 1
-
-        except Exception as e:
-            print(f"Error processing sample {i}: {e}")
-            import traceback
-            traceback.print_exc()
-            # --- 新增：在主异常处理中也尝试删除目录 ---
-            # 检查 sample_dir 是否已定义并存在，以防错误发生在创建目录之前
-            if 'sample_dir' in locals() and os.path.exists(sample_dir):
-                try:
-                    shutil.rmtree(sample_dir)
-                    print(f"[Outer Exception] Cleaned up directory due to error: {sample_dir}")
-                except OSError as remove_error:
-                    print(f"[Outer Exception] Error removing directory {sample_dir} after error: {remove_error}")
+        # --- 检查是否没有成功处理任何搜索帧 ---
+        if not cropped_search_paths:
+            print(f"Skipping sample {i} because no search frames were successfully processed.")
+            if not no_crop:
+                safe_remove_dir(sample_dir)
             skipped_count += 1
             continue
+
+        image_paths_for_sample = cropped_template_paths + cropped_search_paths
+
+        # 构建用户提示
+        init_user_content = []
+
+        # 添加模板帧
+        for _ in range(len(cropped_template_paths)):
+            init_user_content.append({"type": "image"})
+
+        # 描述物体
+        template_text = f"\nThese are the template frames showing the object '{exp_str}'."
+        init_user_content.append({"text": template_text})
+
+        # 添加所有搜索帧
+        for _ in range(len(cropped_search_paths)):
+            init_user_content.append({"type": "image"})
+
+        # 添加跟踪指令，根据搜索帧数量调整语言
+        tracking_instruction = f" Please track the object '{exp_str}' in "
+        if len(cropped_search_paths) > 1:
+            tracking_instruction += f"these {len(cropped_search_paths)} search frames. "
+            tracking_instruction += f"For each of the {len(cropped_search_paths)} frames, provide a separate bounding box. "
+        else:
+            tracking_instruction += "the next frame. "
+            tracking_instruction += "Provide a bounding box for this frame. "
+        tracking_instruction += "The bounding box should be in [x1, y1, x2, y2] format. "
+        tracking_instruction += "Use [0, 0, 0, 0] if the object is not visible. "
+        tracking_instruction += "Wrap each answer in <answer></answer> tags."
+        init_user_content.append({"text": tracking_instruction})
+
+        init_user_msg = {"role": "user", "content": init_user_content}
+        prompt_messages = [init_user_msg]
+
+        # 构建解决方案（仅包含搜索帧的跟踪结果）
+        solution = f"Tracking results for '{exp_str}':\n\n"
+        any_search_invisible = False
+
+        # 只包含搜索帧结果，使用相应的坐标
+        temp_solution_lines = []
+        for idx, search_bbox in enumerate(cropped_search_bboxes):
+            search_idx_relative = idx  # 在no_crop模式下直接使用idx
+            if not no_crop:
+                search_idx_relative = search_indices[idx] - len(template_frame_paths)
+            
+            # 检查原始注释中的可见性标志
+            if search_idx_relative < len(search_valid_list):
+                search_visible = search_valid_list[search_idx_relative]
+            else:
+                print(f"Warning: search_idx {search_idx_relative} out of bounds for visibility list (len {len(search_valid_list)}) for sample {i}. Treating as visible.")
+                search_visible = True
+            
+            # 为多帧情况添加帧标识
+            if len(cropped_search_paths) > 1:
+                frame_prefix = f"Frame {idx+1}: "
+            else:
+                frame_prefix = ""
+                
+            if search_visible:
+                temp_solution_lines.append(f"{frame_prefix}<answer>[{int(search_bbox[0])}, {int(search_bbox[1])}, {int(search_bbox[2])}, {int(search_bbox[3])}]</answer>\n")
+            else:
+                temp_solution_lines.append(f"{frame_prefix}<answer>[0, 0, 0, 0]</answer>\n")
+                any_search_invisible = True
+
+        # --- 检查是否有不可见的搜索帧 ---
+        if any_search_invisible:
+            print(f"Skipping sample {i} because it contains invisible search frames.")
+            if not no_crop:
+                safe_remove_dir(sample_dir)
+            skipped_count += 1
+            continue
+
+        # --- 如果所有搜索帧都可见，则完成solution字符串 ---
+        solution += "".join(temp_solution_lines)
+
+        # 创建样本
+        sample_data = {
+            "image": image_paths_for_sample,
+            "problem": TRACKING_SYSTEM_PROMPT,
+            "solution": solution,
+            "prompt": prompt_messages
+        }
+
+        all_samples.append(sample_data)
+        processed_count += 1
     
     # 统一处理数据格式以解决PyArrow错误
     for sample in all_samples:
@@ -303,7 +292,8 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
     hf_dataset.save_to_disk(dataset_path)
     
     print("-" * 30)
-    print(f"One-turn dataset saved to: {dataset_path}")
+    print(f"Dataset saved to: {dataset_path}")
+    print(f"Mode: {'Original images (no crop)' if no_crop else 'Cropped images'}")
     print(f"Total samples attempted: {data_len}")
     print(f"Samples skipped: {skipped_count}")
     print(f"Total conversation samples: {len(all_samples)}")
@@ -311,13 +301,30 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
     
     return hf_dataset
 
-TRACKING_SYSTEM_PROMPT = (
-    "You are a professional visual object tracking assistant. Your task is to track specified target objects in a video sequence. "
-    # "The user will provide servelal template frames with the target's bounding box, then you need to find the target's new position in subsequent frames. "
-    "The user will provide servelal template frames in the middle of the frames, then you need to find the target's new position in subsequent frames. "
-    "Please directly return the target's bounding box coordinates in the format [x1, y1, x2, y2], where (x1, y1) is the top-left coordinate and (x2, y2) is the bottom-right coordinate. "
-    "Your answer should be wrapped in <answer>[x1, y1, x2, y2]</answer> tags."
-)
+def get_tracking_system_prompt(use_thinking=False):
+    """获取追踪任务的系统提示"""
+    base_prompt = (
+        "You are a professional visual object tracking assistant. Your task is to track specified target objects in a video sequence. "
+        "The user will provide an initial frame with the target's bounding box, then you need to find the target's new position in subsequent frames. "
+    )
+    
+    if use_thinking:
+        return base_prompt + (
+            "You should first think about how to locate the target by analyzing visual features, then provide your answer. "
+            "Put your thinking process inside <thinking>...</thinking> tags. "
+            "Your final answer should be the target's bounding box coordinates in the format [x1, y1, x2, y2], "
+            "where (x1, y1) is the top-left coordinate and (x2, y2) is the bottom-right coordinate. "
+            "Wrap your final answer in <answer>[x1, y1, x2, y2]</answer> tags."
+        )
+    else:
+        return base_prompt + (
+            "Please directly return the target's bounding box coordinates in the format [x1, y1, x2, y2], "
+            "where (x1, y1) is the top-left coordinate and (x2, y2) is the bottom-right coordinate. "
+            "Your answer should be wrapped in <answer>[x1, y1, x2, y2]</answer> tags."
+        )
+
+
+TRACKING_SYSTEM_PROMPT = get_tracking_system_prompt(False)
 
 if __name__ == "__main__":
     # 创建参数解析器
@@ -325,12 +332,16 @@ if __name__ == "__main__":
     
     # 添加命令行参数
     parser.add_argument("--samples_per_epoch", type=int, default=20)
-    parser.add_argument("--output_dir", default='/data1/lihaobo/tracking/rft/test', type=str)
-    parser.add_argument("--template_frames", type=int, default=2)
+    parser.add_argument("--output_dir", default='/data1/lihaobo/tracking/test', type=str)
+    
     parser.add_argument("--scale", type=float, default=1.5)
     parser.add_argument("--search_scale", type=float, default=3.0)
     parser.add_argument("--resize", type=int, default=320)
     parser.add_argument("--seed", type=int, default=42)
+
+    parser.add_argument("--template_frames", type=int, default=2)
+    parser.add_argument("--search_frames", type=int, default=1)
+    parser.add_argument("--no_crop", default=True, help="是否不裁剪图像，直接使用原始图像路径")
     
     # 解析命令行参数
     args = parser.parse_args()
@@ -352,14 +363,12 @@ if __name__ == "__main__":
     from build_pytorch_dataset import build_dataset
     
     # 构建PyTorch数据集
-    train_dataset, _ = build_dataset()
-    
-    # 使用命令行参数设置样本数量
-    if args.samples_per_epoch > 0:
-        train_dataset.samples_per_epoch = args.samples_per_epoch
-        print(f"Processing {args.samples_per_epoch} samples per epoch")
-    else:
-        print("Processing all samples in the dataset")
+    train_dataset = build_dataset(num_search_frames=args.search_frames, num_template_frames=args.template_frames)
+
+
+    train_dataset.samples_per_epoch = args.samples_per_epoch
+    print(f"Processing {args.samples_per_epoch} samples per epoch")
+
     
     # 构建使用裁剪图像的一轮跟踪数据集
     output_dir = args.output_dir
@@ -371,7 +380,8 @@ if __name__ == "__main__":
         template_frames=args.template_frames,
         scale=args.scale,
         search_scale=args.search_scale,
-        resize=args.resize
+        resize=args.resize,
+        no_crop=args.no_crop
     )
     
     # 加载并检查数据集

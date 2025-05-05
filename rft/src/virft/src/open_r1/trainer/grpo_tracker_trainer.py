@@ -17,6 +17,8 @@ import textwrap
 from collections import defaultdict
 from typing import Any, Callable, Optional, Union
 from PIL import Image
+import inspect
+from transformers.image_processing_utils import get_image_size
 
 import torch
 import torch.utils.data
@@ -110,6 +112,8 @@ class Qwen25VLGRPOTrainer(Trainer):
         min_pixels: Optional[int] = 3136,
         attn_implementation: str = "flash_attention_2",
     ):
+        self.max_pixels = max_pixels
+        self.min_pixels = min_pixels
         # Configure args
         if args is None:
             model_name = model if isinstance(model, str) else model.config._name_or_path
@@ -319,35 +323,92 @@ class Qwen25VLGRPOTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Compute GRPO loss for tracking task
-        
+
         Args:
             model: The model being trained
-            inputs: Input data dictionary
+            inputs: Input data dictionary (list of dicts)
             return_outputs: Whether to return outputs (not supported)
             num_items_in_batch: Number of items in batch
-            
+
         Returns:
             The computed loss value
         """
         if return_outputs:
             raise ValueError("The GRPO Trainer does not support returning outputs")
-        
+
 
         prompts = [x["prompt"] for x in inputs]
         prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
-        images = [x["image"] for x in inputs]
+        images_per_sample = [x["image"] for x in inputs] # Keep the list of lists structure
+
+        # --- Start: Flatten images and get counts ---
+        flat_images = [img for sample_images in images_per_sample for img in sample_images]
+        image_counts = [len(sample_images) for sample_images in images_per_sample]
+        # --- End: Flatten images and get counts ---
+
+        original_sizes = []
+        resized_sizes = []
+        image_processor = self.processing_class.image_processor
+        min_pixels = getattr(image_processor, 'min_pixels', self.min_pixels)
+        max_pixels = getattr(image_processor, 'max_pixels', self.max_pixels)
+
+        # Iterate through each sample in the batch
+        for image_list_for_sample in images_per_sample:
+            # Assuming the resize logic depends primarily on the first image of the sequence,
+            # or that we need one size pair per sample for the reward function.
+            # If image_list_for_sample is empty or not a list, handle appropriately (though dataset should prevent this)
+            if not image_list_for_sample:
+                 # Handle case of empty image list for a sample if necessary, maybe append None or raise error
+                 # For now, assume it's non-empty based on typical dataset structure
+                 # If it can be empty, add specific handling logic here.
+                 # Let's assume it's guaranteed to have at least one image based on dataset prep.
+                 raise ValueError("Encountered a sample with an empty image list.")
+
+            first_image = image_list_for_sample[0] # Get the first image of the sequence
+
+            # Calculate original size from the first image
+            original_width, original_height = first_image.size
+            original_sizes.append((original_height, original_width))
+
+            # Predict resized dimensions based on the first image
+            # Using the same scaling logic as before
+            num_pixels = original_height * original_width
+            scale = 1.0
+            if num_pixels > max_pixels:
+                scale = (max_pixels / num_pixels) ** 0.5
+            elif num_pixels < min_pixels:
+                 scale = (min_pixels / num_pixels) ** 0.5
+            # Avoid unnecessary scaling if already within bounds and scale is ~1.0
+            # This check might be implicit in the calculation but can be made explicit
+            # if abs(scale - 1.0) < 1e-6: scale = 1.0
+
+            resized_height = int(original_height * scale + 0.5)
+            resized_width = int(original_width * scale + 0.5)
+
+            resized_sizes.append((resized_height, resized_width))
+
+        # --- End: Predict resize and store sizes ---
+
+        # Pass the flat list of images and counts to the processor
+        # Check if the processor supports 'image_counts' argument
+        processor_signature = inspect.signature(self.processing_class.__call__)
+        processor_kwargs = {
+            "text": prompts_text,
+            "images": flat_images, # Pass the flat list
+            "return_tensors": "pt",
+            "padding": True,
+            "padding_side": "left",
+            "add_special_tokens": False,
+        }
+        if 'image_counts' in processor_signature.parameters:
+             processor_kwargs['image_counts'] = image_counts # Pass the counts if supported
+
+        prompt_inputs = self.processing_class(**processor_kwargs)
 
 
-        prompt_inputs = self.processing_class(
-            text=prompts_text,
-            images=images,
-            return_tensors="pt",
-            padding=True,
-            padding_side="left",
-            add_special_tokens=False,
-        )
-        
         prompt_inputs = super()._prepare_inputs(prompt_inputs)
+
+        # ... rest of the compute_loss method remains the same ...
 
         # Extract input components
         prompt_ids, prompt_mask = prompt_inputs["input_ids"], prompt_inputs["attention_mask"]
@@ -366,15 +427,18 @@ class Qwen25VLGRPOTrainer(Trainer):
                 # Ensure pixel_values is properly formatted
                 if len(prompt_inputs['pixel_values'].shape) == 3:
                     prompt_inputs['pixel_values'] = prompt_inputs['pixel_values'].unsqueeze(0)
-                
             # Generate completions
+            # The generate function expects batch dimension first.
+            # Check how processor handles list of lists input regarding batching.
+            # Assuming processor flattens or handles it appropriately for generate.
+            # If generate fails, prompt_inputs might need reshaping or different handling.
             prompt_completion_ids = unwrapped_model.generate(**prompt_inputs, generation_config=self.generation_config)
 
             # Split prompt and completion
             prompt_length = prompt_ids.size(1)
             prompt_ids = prompt_completion_ids[:, :prompt_length]
             completion_ids = prompt_completion_ids[:, prompt_length:]
-            
+
             # Repeat prompt mask for each generation
             prompt_mask = prompt_mask.repeat_interleave(self.num_generations, dim=0)
 
@@ -387,13 +451,15 @@ class Qwen25VLGRPOTrainer(Trainer):
         completion_mask = (sequence_indices <= eos_idx.unsqueeze(1)).int()
 
         # Combine masks and repeat image tensors
-        attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)  # (B*G, P+C)
+        attention_mask = torch.cat([prompt_mask, completion_mask], dim=1)
         pixel_values = pixel_values.repeat_interleave(self.num_generations, dim=0)
         image_grid_thw = image_grid_thw.repeat_interleave(self.num_generations, dim=0)
+        # prompt_completion_ids = prompt_completion_ids.repeat_interleave(self.num_generations, dim=0) # Repeat generated ids too
+
 
         # Get log probabilities from current model
         per_token_logps = self._get_per_token_logps(model, prompt_completion_ids, attention_mask, pixel_values, image_grid_thw)
-        per_token_logps = per_token_logps[:, prompt_length - 1:]
+        per_token_logps = per_token_logps[:, prompt_length - 1:] # Adjust index if prompt_length definition changes
 
         # Get log probabilities from reference model
         with torch.inference_mode():
@@ -406,7 +472,7 @@ class Qwen25VLGRPOTrainer(Trainer):
                     ref_per_token_logps = self._get_per_token_logps(
                         model, prompt_completion_ids, attention_mask, pixel_values, image_grid_thw
                     )
-        ref_per_token_logps = ref_per_token_logps[:, prompt_length - 1:]
+        ref_per_token_logps = ref_per_token_logps[:, prompt_length - 1:] # Adjust index
 
         # Calculate KL divergence
         per_token_kl = torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1
@@ -414,11 +480,24 @@ class Qwen25VLGRPOTrainer(Trainer):
         # Decode completions
         completions = self.processing_class.batch_decode(completion_ids, skip_special_tokens=True)
         if is_conversational(inputs[0]):
+             # This assumes completions correspond 1:1 with original batch size * num_generations
             completions = [[{"role": "assistant", "content": completion}] for completion in completions]
 
         # Prepare for reward calculation
         prompts = [prompt for prompt in prompts for _ in range(self.num_generations)]
 
+        # --- Start: Prepare reward_kwargs including sizes ---
+        reward_kwargs = {key: [] for key in inputs[0].keys() if key not in ["prompt", "completion", "image"]}
+        for key in reward_kwargs:
+            for example in inputs:
+                reward_kwargs[key].extend([example[key]] * self.num_generations)
+
+        # original_sizes and resized_sizes now correctly have one pair per sample
+        reward_kwargs['original_size'] = [size for size in original_sizes for _ in range(self.num_generations)]
+        reward_kwargs['resized_size'] = [size for size in resized_sizes for _ in range(self.num_generations)]
+        # --- End: Prepare reward_kwargs including sizes ---
+
+        # ... rest of the reward calculation and loss computation ...
         # Calculate rewards for each reward function
         rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs), device=device)
         for i, (reward_func, reward_processing_class) in enumerate(
@@ -431,58 +510,36 @@ class Qwen25VLGRPOTrainer(Trainer):
                     texts = [apply_chat_template(x, reward_processing_class)["text"] for x in messages]
                 else:
                     texts = [p + c for p, c in zip(prompts, completions)]
-                    
+
                 reward_inputs = reward_processing_class(
                     texts, return_tensors="pt", padding=True, padding_side="right", add_special_tokens=False
                 )
                 reward_inputs = super()._prepare_inputs(reward_inputs)
-                
+
                 with torch.inference_mode():
                     rewards_per_func[:, i] = reward_func(**reward_inputs).logits[:, 0]
             else:
                 # Handle custom reward functions
-                # Gather additional kwargs from inputs
-                reward_kwargs = {key: [] for key in inputs[0].keys() if key not in ["prompt", "completion"]}
-                for key in reward_kwargs:
-                    for example in inputs:
-                        reward_kwargs[key].extend([example[key]] * self.num_generations)
-                
-                # Special handling for tracking rewards
                 if "solution" in reward_kwargs:
                     solutions = reward_kwargs["solution"]
                 else:
                     solutions = [None] * len(prompts)
-                
-                # Special handling for tracking_confidence reward which might need history
-                if hasattr(reward_func, "__name__") and "tracking_confidence" in reward_func.__name__:
-                    if "tracking_history" in reward_kwargs:
-                        tracking_history = reward_kwargs["tracking_history"]
-                        output_reward_func = reward_func(
-                            prompts=prompts, 
-                            completions=completions, 
-                            solution=solutions, 
-                            tracking_history=tracking_history
-                        )
-                    else:
-                        output_reward_func = reward_func(
-                            prompts=prompts, 
-                            completions=completions, 
-                            solution=solutions
-                        )
-                else:
-                    output_reward_func = reward_func(
-                        prompts=prompts, 
-                        completions=completions, 
-                        solution=solutions, 
-                        **{k: v for k, v in reward_kwargs.items() if k != "solution"}
-                    )
-                
+
+                reward_kwargs = {key: reward_kwargs[key] for key in reward_kwargs if key != "solution"}
+                output_reward_func = reward_func(
+                    # prompts=prompts,
+                    completions=completions,
+                    solution=solutions,
+                    **reward_kwargs
+                )
+
                 rewards_per_func[:, i] = torch.tensor(output_reward_func, dtype=torch.float32, device=device)
 
         # Sum rewards from all functions
         rewards = rewards_per_func.sum(dim=1)
 
         # Calculate grouped rewards statistics
+        # Ensure rewards shape matches (batch_size * num_generations)
         mean_grouped_rewards = rewards.view(-1, self.num_generations).mean(dim=1)
         std_grouped_rewards = rewards.view(-1, self.num_generations).std(dim=1)
 
@@ -513,6 +570,7 @@ class Qwen25VLGRPOTrainer(Trainer):
 
         mean_kl = ((per_token_kl * completion_mask).sum(dim=1) / (completion_mask.sum(dim=1) + 1e-8)).mean()
         self._metrics["kl"].append(self.accelerator.gather_for_metrics(mean_kl).mean().item())
+
 
         return loss
 

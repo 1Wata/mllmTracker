@@ -328,19 +328,15 @@ class Qwen25VLGRPOTrainer(Trainer):
 
             formatted_texts.append(current_text)
 
-        try:
-            prompt_inputs = self.processing_class(
-                text=formatted_texts,
-                images=flattened_images,
-                return_tensors="pt",
-                padding=True,
-                add_special_tokens=False,
-            )
-        except Exception as e:
-            print("Error during processing:", e)
-            print("Formatted Texts:", formatted_texts)
-            print("Number of flattened images:", len(flattened_images))
-            raise e
+
+        prompt_inputs = self.processing_class(
+            text=formatted_texts,
+            images=flattened_images,
+            return_tensors="pt",
+            padding=True,
+            add_special_tokens=False,
+        )
+
 
         prompt_inputs = self._prepare_inputs(prompt_inputs)
 

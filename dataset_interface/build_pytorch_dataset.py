@@ -170,7 +170,7 @@ def names2datasets(name_list: list, settings, image_loader):
     return datasets
 
 
-def build_dataset():
+def build_dataset(num_search_frames=1, num_template_frames=1):
     from easydict import EasyDict
     import yaml
     import os
@@ -186,26 +186,29 @@ def build_dataset():
         p_datasets=cfg.DATA.TRAIN.DATASETS_RATIO,
         samples_per_epoch=cfg.DATA.TRAIN.SAMPLE_PER_EPOCH,
         max_gap=cfg.DATA.MAX_SAMPLE_INTERVAL,
-        num_search_frames=cfg.DATA.SEARCH.NUMBER,
-        num_template_frames=cfg.DATA.TEMPLATE.NUMBER,
-        # max_prev_template_frames=cfg.DATA.PREV_TEMPLATE.NUMBER - 1,
+        # num_search_frames=cfg.DATA.SEARCH.NUMBER,
+        # num_template_frames=cfg.DATA.TEMPLATE.NUMBER,
+        num_search_frames=num_search_frames,
+        num_template_frames=num_template_frames,
     )
 
     # Validation samplers and loaders
-    dataset_val = TrackingSampler(
-        datasets=names2datasets(cfg.DATA.VAL.DATASETS_NAME, cfg, opencv_loader),
-        p_datasets=cfg.DATA.VAL.DATASETS_RATIO,
-        samples_per_epoch=cfg.DATA.VAL.SAMPLE_PER_EPOCH,
-        max_gap=cfg.DATA.MAX_SAMPLE_INTERVAL,
-        num_search_frames=cfg.DATA.SEARCH.NUMBER,
-        num_template_frames=cfg.DATA.TEMPLATE.NUMBER,
-        # max_prev_template_frames=cfg.DATA.PREV_TEMPLATE.NUMBER - 1,
-    )
+    # dataset_val = TrackingSampler(
+    #     datasets=names2datasets(cfg.DATA.VAL.DATASETS_NAME, cfg, opencv_loader),
+    #     p_datasets=cfg.DATA.VAL.DATASETS_RATIO,
+    #     samples_per_epoch=cfg.DATA.VAL.SAMPLE_PER_EPOCH,
+    #     max_gap=cfg.DATA.MAX_SAMPLE_INTERVAL,
+    #     # num_search_frames=cfg.DATA.SEARCH.NUMBER,
+    #     # num_template_frames=cfg.DATA.TEMPLATE.NUMBER,
+    #     num_search_frames=num_search_frames,
+    #     num_template_frames=num_template_frames,
+    # )
 
-    return dataset_train, dataset_val
+    # return dataset_train, dataset_val
+    return dataset_train
 
 if __name__ == "__main__":
-    train_dataset, val_dataset = build_dataset()
+    train_dataset = build_dataset()
     train_data0 = train_dataset[0]
     print(train_data0.keys())
     print(train_data0["template_images"])
