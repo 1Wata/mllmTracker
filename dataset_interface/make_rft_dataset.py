@@ -12,8 +12,8 @@ from utils.utils import normalize_bbox_xyhw
 from make_crop_dataset import crop_and_pad_template, crop_and_pad_search, jitter_bbox, convert_bbox_format, is_bbox_fully_visible
 
 
-def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_turn_tracking_dataset_cropped",
-                                          template_frames=1, scale=2.0, search_scale=4.0, resize=320, no_crop=False):
+def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracking_dataset_cropped",
+                                    template_frames=1, scale=2.0, search_scale=4.0, resize=320, no_crop=False):
     """
     构建一个跟踪数据集，可选是否使用裁剪图像。
     
@@ -77,37 +77,47 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
             exp_str = exp_str[:-1]
         
         # 检查序列是否有足够的帧
-        if len(template_frame_paths) < template_frames or len(search_frame_paths) < 1:
-            if not no_crop:
+        if len(template_frame_paths) == 0 or len(search_frame_paths) < 1: # Need at least one template initially
+            if not no_crop and sample_dir:
                 safe_remove_dir(sample_dir)
             skipped_count += 1
             continue
-        
+            
         # 获取有效帧列表
         template_valid_list = template_anno_dict.get('valid', [True] * len(template_frame_paths))
         search_valid_list = search_anno_dict.get('valid', [True] * len(search_frame_paths))
-        
+
         # --- 组合模板帧和搜索帧 ---
         frame_paths = template_frame_paths + search_frame_paths
         num_frames = len(frame_paths)
-        
+
         # 组合标注信息
         annotations_dict = {
             'bbox': template_anno_dict.get('bbox', []) + search_anno_dict.get('bbox', []),
             'visible': template_valid_list + search_valid_list
         }
-        
+
+        # --- Determine template indices based on probability ---
+        # 10% chance to use only the last template frame if more than one is requested and available
+        use_last_template_only = random.random() < 0.1 and template_frames > 1 and len(template_frame_paths) > 0
+
         if no_crop:
-            # 不裁剪时直接使用原始图像路径和边界框
-            template_indices = list(range(min(template_frames, len(template_frame_paths))))
+            # --- Determine template indices ---
+            if use_last_template_only:
+                template_indices = [len(template_frame_paths) - 1]
+            else:
+                # Use up to template_frames, but no more than available
+                num_templates_to_use = min(template_frames, len(template_frame_paths))
+                template_indices = list(range(num_templates_to_use))
+
             search_indices = list(range(len(template_frame_paths), num_frames))
-            
+
             # 使用原始模板帧路径
             cropped_template_paths = [template_frame_paths[idx] for idx in template_indices]
-            
+
             # 使用原始搜索帧路径
             cropped_search_paths = [frame_paths[idx] for idx in search_indices]
-            
+
             # 使用原始边界框
             cropped_search_bboxes = []
             for search_idx in search_indices:
@@ -115,52 +125,66 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
                 bbox_raw = bbox_raw.tolist() if isinstance(bbox_raw, torch.Tensor) else bbox_raw
                 search_bbox = convert_bbox_format(bbox_raw)  # 转换为 [x1, y1, x2, y2] 格式
                 cropped_search_bboxes.append(search_bbox)
-            
+
         else:
-            # 裁剪模式下的原有处理逻辑
+            # 裁剪模式下的处理逻辑
             # --- 获取所有帧的原始数据 ---
             all_bboxes_orig_raw = []
             all_frame_dims = []
-            
+
             for frame_idx, frame_path in enumerate(frame_paths):
                 with Image.open(frame_path) as img:
                     img_w, img_h = img.size
                     all_frame_dims.append((img_w, img_h))
-                
+
                 bbox_raw = annotations_dict['bbox'][frame_idx].tolist() if isinstance(annotations_dict['bbox'][frame_idx], torch.Tensor) else annotations_dict['bbox'][frame_idx]
                 convert_bbox_format(bbox_raw)  # 检查边界框格式是否有效
                 all_bboxes_orig_raw.append(bbox_raw)
-            
-            # --- 处理模板帧 ---
-            template_indices = list(range(min(template_frames, len(template_frame_paths))))
-            template_bboxes_orig = [convert_bbox_format(all_bboxes_orig_raw[idx]) for idx in template_indices]
-            template_bboxes_jittered = [jitter_bbox(bbox, jitter_scale=0.05) for bbox in template_bboxes_orig]
-            
+
+            # --- Determine template indices ---
+            if use_last_template_only:
+                template_indices = [len(template_frame_paths) - 1]
+            else:
+                # Use up to template_frames, but no more than available
+                num_templates_to_use = min(template_frames, len(template_frame_paths))
+                template_indices = list(range(num_templates_to_use))
+
+            # --- 处理选定的模板帧 ---
+            if not template_indices: # Should not happen if initial check passed, but safety first
+                 print(f"Skipping sample {i} because no template indices were selected.")
+                 if sample_dir: safe_remove_dir(sample_dir)
+                 skipped_count += 1
+                 continue
+
+            template_bboxes_orig_selected = [convert_bbox_format(all_bboxes_orig_raw[idx]) for idx in template_indices]
+            template_bboxes_jittered_selected = [jitter_bbox(bbox, jitter_scale=0.05) for bbox in template_bboxes_orig_selected]
+
             cropped_template_paths = []
-            for t_idx, template_idx in enumerate(template_indices):
+            for t_idx, template_idx in enumerate(template_indices): # Iterate using selected indices
                 cropped_template = crop_and_pad_template(
-                    frame_paths[template_idx], 
-                    template_bboxes_jittered[t_idx], 
-                    scale=scale, 
+                    frame_paths[template_idx],
+                    template_bboxes_jittered_selected[t_idx], # Use corresponding jittered bbox
+                    scale=scale,
                     resize=resize
                 )
-                template_filename = f"template_{template_idx:03d}.jpg"
+                template_filename = f"template_{template_idx:03d}.jpg" # Use original index for filename
                 template_save_path = os.path.join(sample_dir, template_filename)
                 cropped_template.save(template_save_path)
                 cropped_template_paths.append(template_save_path)
-            
+
             # --- 处理所有搜索帧 (除了模板帧) ---
-            search_indices = [idx for idx in range(num_frames) if idx not in template_indices and idx >= len(template_frame_paths)]
+            # Search indices start after all *original* template frames
+            search_indices = list(range(len(template_frame_paths), num_frames))
             cropped_search_paths = []
             cropped_search_bboxes = []
-            
-            reference_bbox_for_search_crop = template_bboxes_jittered[0]
-            
+
+            # Use the first *selected* jittered bbox as reference
+            reference_bbox_for_search_crop = template_bboxes_jittered_selected[0]
+
             for search_idx in search_indices:
                 search_bbox_orig = convert_bbox_format(all_bboxes_orig_raw[search_idx])
 
                 try:
-                    # 只保留这里的try-except，因为crop_and_pad_search函数中可能会raise error
                     cropped_search_img, search_bbox_new, crop_region, _ = crop_and_pad_search(
                         frame_paths[search_idx],
                         reference_bbox_for_search_crop,
@@ -169,7 +193,9 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
                         resize=resize
                     )
 
-                    search_filename = f"search_{search_idx - len(template_frame_paths):03d}.jpg"
+                    # Calculate relative index for filename (index within search frames)
+                    search_filename_idx = search_idx - len(template_frame_paths)
+                    search_filename = f"search_{search_filename_idx:03d}.jpg"
                     search_save_path = os.path.join(sample_dir, search_filename)
                     cropped_search_img.save(search_save_path)
 
@@ -177,12 +203,12 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
                     cropped_search_bboxes.append(search_bbox_new)
                 except Exception as e:
                     print(f"Warning: Error processing search frame {search_idx} for sample {i}: {e}")
-                    continue  # 跳过这个搜索帧，继续处理下一个
+                    continue # Skip this search frame
 
         # --- 检查是否没有成功处理任何搜索帧 ---
         if not cropped_search_paths:
             print(f"Skipping sample {i} because no search frames were successfully processed.")
-            if not no_crop:
+            if not no_crop and sample_dir:
                 safe_remove_dir(sample_dir)
             skipped_count += 1
             continue
@@ -211,10 +237,9 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
             tracking_instruction += f"For each of the {len(cropped_search_paths)} frames, provide a separate bounding box. "
         else:
             tracking_instruction += "the next frame. "
-            tracking_instruction += "Provide a bounding box for this frame. "
-        tracking_instruction += "The bounding box should be in [x1, y1, x2, y2] format. "
-        tracking_instruction += "Use [0, 0, 0, 0] if the object is not visible. "
-        tracking_instruction += "Wrap each answer in <answer></answer> tags."
+            tracking_instruction += "Provide a bounding box for the last frame. "
+        # tracking_instruction += "The bounding box should be in [x1, y1, x2, y2] format. "
+        # tracking_instruction += "Wrap each answer in <answer></answer> tags."
         init_user_content.append({"text": tracking_instruction})
 
         init_user_msg = {"role": "user", "content": init_user_content}
@@ -304,8 +329,9 @@ def build_one_turn_tracking_dataset_cropped(pytorch_dataset, output_dir="one_tur
 def get_tracking_system_prompt(use_thinking=False):
     """获取追踪任务的系统提示"""
     base_prompt = (
-        "You are a professional visual object tracking assistant. Your task is to track specified target objects in a video sequence. "
-        "The user will provide an initial frame with the target's bounding box, then you need to find the target's new position in subsequent frames. "
+        "You are a professional visual object tracking assistant. Your task is to track a specified target object. "
+        "The user will provide template frames showing the target object. "
+        "First, identify the target in the template frames. Then, locate the target's position in the following search frames."
     )
     
     if use_thinking:
@@ -374,7 +400,7 @@ if __name__ == "__main__":
     output_dir = args.output_dir
     print(f"Output directory set to: {output_dir}")
     
-    build_one_turn_tracking_dataset_cropped(
+    build_one_turn_tracking_dataset(
         train_dataset,
         output_dir=output_dir,
         template_frames=args.template_frames,
@@ -388,5 +414,5 @@ if __name__ == "__main__":
     from datasets import load_from_disk
     dataset = load_from_disk(f"{output_dir}/tracking_dataset")
     print("Dataset sample:")
-    print(dataset[0])
+    print(dataset[4])
     print(f"Total samples: {len(dataset)}")

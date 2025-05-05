@@ -50,6 +50,7 @@ from trl.trainer.grpo_config import GRPOConfig
 from trl.trainer.utils import generate_model_card, get_comet_experiment_url
 
 import copy
+import math
 
 
 if is_peft_available():
@@ -61,6 +62,37 @@ if is_wandb_available():
 # What we call a reward function is a callable that takes a list of prompts and completions and returns a list of
 # rewards. When it's a string, it's a model ID, so it's loaded as a pretrained model.
 RewardFunc = Union[str, PreTrainedModel, Callable[[list, list], list[float]]]
+
+
+def smart_resize(
+    height: int, width: int, factor: int = 28, min_pixels: int = 56 * 56, max_pixels: int = 14 * 14 * 4 * 1280
+):
+    """Rescales the image so that the following conditions are met:
+
+    1. Both dimensions (height and width) are divisible by 'factor'.
+
+    2. The total number of pixels is within the range ['min_pixels', 'max_pixels'].
+
+    3. The aspect ratio of the image is maintained as closely as possible.
+
+    """
+    if height < factor or width < factor:
+        raise ValueError(f"height:{height} or width:{width} must be larger than factor:{factor}")
+    elif max(height, width) / min(height, width) > 200:
+        raise ValueError(
+            f"absolute aspect ratio must be smaller than 200, got {max(height, width) / min(height, width)}"
+        )
+    h_bar = round(height / factor) * factor
+    w_bar = round(width / factor) * factor
+    if h_bar * w_bar > max_pixels:
+        beta = math.sqrt((height * width) / max_pixels)
+        h_bar = math.floor(height / beta / factor) * factor
+        w_bar = math.floor(width / beta / factor) * factor
+    elif h_bar * w_bar < min_pixels:
+        beta = math.sqrt(min_pixels / (height * width))
+        h_bar = math.ceil(height * beta / factor) * factor
+        w_bar = math.ceil(width * beta / factor) * factor
+    return h_bar, w_bar
 
 
 class Qwen25VLGRPOTrainer(Trainer):
@@ -320,6 +352,69 @@ class Qwen25VLGRPOTrainer(Trainer):
         """Custom input preparation for GRPO trainer"""
         return inputs
 
+    def _calculate_image_sizes(self, images_per_sample):
+        """
+        计算每个样本的原始尺寸和调整后的尺寸，使用smart_resize确保符合模型要求
+        
+        Args:
+            images_per_sample: 列表的列表，每个内部列表包含一个样本的所有图像
+            
+        Returns:
+            tuple: (original_sizes, resized_sizes) 包含每个样本的尺寸信息
+        """
+        original_sizes = []
+        resized_sizes = []
+        image_processor = self.processing_class.image_processor
+        min_pixels = getattr(image_processor, 'min_pixels', self.min_pixels)
+        max_pixels = getattr(image_processor, 'max_pixels', self.max_pixels)
+        
+        # Qwen系列模型的默认参数
+        patch_size = 14  # 默认patch大小
+        merge_size = 2   # 默认merge大小
+        factor = patch_size * merge_size  # 缩放因子
+        
+        # 遍历批次中的每个样本
+        for image_list_for_sample in images_per_sample:
+            if not image_list_for_sample:
+                raise ValueError("Encountered a sample with an empty image list.")
+            
+            # 使用第一张图像确定该样本的分辨率（假设同一样本内所有图像分辨率相同）
+            first_image = image_list_for_sample[0]
+            original_width, original_height = first_image.size
+            original_sizes.append((original_height, original_width))
+            
+            # 使用smart_resize计算调整后的尺寸
+            try:
+                resized_height, resized_width = smart_resize(
+                    original_height, 
+                    original_width,
+                    factor=factor,
+                    min_pixels=min_pixels,
+                    max_pixels=max_pixels
+                )
+                resized_sizes.append((resized_height, resized_width))
+            except ValueError as e:
+                # 处理特殊情况，例如过小的图像或极端宽高比
+                print(f"Warning: {e}. Using fallback resizing method for image size ({original_height}, {original_width}).")
+                # 使用原始简单缩放作为备选方案
+                num_pixels = original_height * original_width
+                scale = 1.0
+                if num_pixels > max_pixels:
+                    scale = (max_pixels / num_pixels) ** 0.5
+                elif num_pixels < min_pixels:
+                    scale = (min_pixels / num_pixels) ** 0.5
+                
+                # 确保尺寸可被factor整除
+                resized_height = int(original_height * scale + 0.5)
+                resized_height = math.ceil(resized_height / factor) * factor
+                
+                resized_width = int(original_width * scale + 0.5)
+                resized_width = math.ceil(resized_width / factor) * factor
+                
+                resized_sizes.append((resized_height, resized_width))
+        
+        return original_sizes, resized_sizes
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Compute GRPO loss for tracking task
@@ -338,56 +433,34 @@ class Qwen25VLGRPOTrainer(Trainer):
 
 
         prompts = [x["prompt"] for x in inputs]
-        prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in inputs]
-        images_per_sample = [x["image"] for x in inputs] # Keep the list of lists structure
+        # 获取system prompt (problem字段)
+        system_prompts = [x.get("problem", "") for x in inputs]  # 使用get安全地获取problem字段
+
+        # 创建包含system prompt的完整输入
+        formatted_examples = []
+        for i, example in enumerate(inputs):
+            # 深拷贝避免修改原始输入
+            formatted_example = copy.deepcopy(example)
+            # 如果存在system prompt，将其添加到适当位置
+            if system_prompts[i]:
+                # 如果数据是对话格式，确保system prompt作为对话的第一部分
+                if is_conversational(example):
+                    if not any(msg.get("role") == "system" for msg in formatted_example["prompt"]):
+                        formatted_example["prompt"].insert(0, {"role": "system", "content": system_prompts[i]})
+                else:
+                    formatted_example["system_prompt"] = system_prompts[i]
+            formatted_examples.append(formatted_example)
+
+        # 使用处理后的examples
+        prompts_text = [maybe_apply_chat_template(example, self.processing_class)["prompt"] for example in formatted_examples]
+        images_per_sample = [x["image"] for x in inputs]
 
         # --- Start: Flatten images and get counts ---
         flat_images = [img for sample_images in images_per_sample for img in sample_images]
         image_counts = [len(sample_images) for sample_images in images_per_sample]
         # --- End: Flatten images and get counts ---
 
-        original_sizes = []
-        resized_sizes = []
-        image_processor = self.processing_class.image_processor
-        min_pixels = getattr(image_processor, 'min_pixels', self.min_pixels)
-        max_pixels = getattr(image_processor, 'max_pixels', self.max_pixels)
-
-        # Iterate through each sample in the batch
-        for image_list_for_sample in images_per_sample:
-            # Assuming the resize logic depends primarily on the first image of the sequence,
-            # or that we need one size pair per sample for the reward function.
-            # If image_list_for_sample is empty or not a list, handle appropriately (though dataset should prevent this)
-            if not image_list_for_sample:
-                 # Handle case of empty image list for a sample if necessary, maybe append None or raise error
-                 # For now, assume it's non-empty based on typical dataset structure
-                 # If it can be empty, add specific handling logic here.
-                 # Let's assume it's guaranteed to have at least one image based on dataset prep.
-                 raise ValueError("Encountered a sample with an empty image list.")
-
-            first_image = image_list_for_sample[0] # Get the first image of the sequence
-
-            # Calculate original size from the first image
-            original_width, original_height = first_image.size
-            original_sizes.append((original_height, original_width))
-
-            # Predict resized dimensions based on the first image
-            # Using the same scaling logic as before
-            num_pixels = original_height * original_width
-            scale = 1.0
-            if num_pixels > max_pixels:
-                scale = (max_pixels / num_pixels) ** 0.5
-            elif num_pixels < min_pixels:
-                 scale = (min_pixels / num_pixels) ** 0.5
-            # Avoid unnecessary scaling if already within bounds and scale is ~1.0
-            # This check might be implicit in the calculation but can be made explicit
-            # if abs(scale - 1.0) < 1e-6: scale = 1.0
-
-            resized_height = int(original_height * scale + 0.5)
-            resized_width = int(original_width * scale + 0.5)
-
-            resized_sizes.append((resized_height, resized_width))
-
-        # --- End: Predict resize and store sizes ---
+        original_sizes, resized_sizes = self._calculate_image_sizes(images_per_sample)
 
         # Pass the flat list of images and counts to the processor
         # Check if the processor supports 'image_counts' argument

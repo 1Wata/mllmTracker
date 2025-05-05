@@ -3,6 +3,7 @@
 data/
 data_upload/
 dataset_interface-2/
+test/
 
 # Ignore the share_models subfolder within rft
 rft/share_models/
