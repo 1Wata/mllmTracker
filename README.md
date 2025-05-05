@@ -64,12 +64,12 @@ env:
 
 ```shell
 cd dataset_interface
-python make_rft_crop_dataset.py --samples_per_epoch 40000 --output_dir path/to/save/dataset
+python make_rft_dataset.py --samples_per_epoch 40000 --output_dir path/to/save/dataset
 ```
 
 ## Step3. 训练
 
-开始训练，训练脚本在 `rft/src/scripts/3B_tracking.sh` 下，在开始训练之前需要修改 `3B_tracking.sh` 中的几个参数，包括上面制作数据集的路径，gpu 数量设置等，运行命令：
+开始训练，首先要下载 Qwen2.5VL-3B 模型在 `./rft/share_models`路径下。再启动训练脚本，训练脚本在 `rft/src/scripts/3B_tracking.sh` 下，在开始训练之前需要修改 `3B_tracking.sh` 中的几个参数，包括上面制作数据集的路径，gpu 数量设置等，运行命令：
 
 ```c
 cd rft

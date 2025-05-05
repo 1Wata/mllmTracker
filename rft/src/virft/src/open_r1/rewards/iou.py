@@ -187,7 +187,7 @@ def ciou(bbox1, bbox2, eps=1e-7):
     return ciou_value
 
 
-def calculate_iou(bbox1, bbox2, style='ciou'):
+def calculate_iou(bbox1, bbox2, style='miou'):
     
     
 
