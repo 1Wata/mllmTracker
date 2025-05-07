@@ -51,7 +51,7 @@ from trl.trainer.utils import generate_model_card, get_comet_experiment_url
 
 import copy
 import math
-from open_r1.utils.utils import transform_bbox
+from open_r1.utils.utils import transform_bbox, smart_resize
 
 if is_peft_available():
     from peft import PeftConfig, get_peft_model
@@ -64,35 +64,6 @@ if is_wandb_available():
 RewardFunc = Union[str, PreTrainedModel, Callable[[list, list], list[float]]]
 
 
-def smart_resize(
-    height: int, width: int, factor: int = 28, min_pixels: int = 56 * 56, max_pixels: int = 14 * 14 * 4 * 1280
-):
-    """Rescales the image so that the following conditions are met:
-
-    1. Both dimensions (height and width) are divisible by 'factor'.
-
-    2. The total number of pixels is within the range ['min_pixels', 'max_pixels'].
-
-    3. The aspect ratio of the image is maintained as closely as possible.
-
-    """
-    if height < factor or width < factor:
-        raise ValueError(f"height:{height} or width:{width} must be larger than factor:{factor}")
-    elif max(height, width) / min(height, width) > 200:
-        raise ValueError(
-            f"absolute aspect ratio must be smaller than 200, got {max(height, width) / min(height, width)}"
-        )
-    h_bar = round(height / factor) * factor
-    w_bar = round(width / factor) * factor
-    if h_bar * w_bar > max_pixels:
-        beta = math.sqrt((height * width) / max_pixels)
-        h_bar = math.floor(height / beta / factor) * factor
-        w_bar = math.floor(width / beta / factor) * factor
-    elif h_bar * w_bar < min_pixels:
-        beta = math.sqrt(min_pixels / (height * width))
-        h_bar = math.ceil(height * beta / factor) * factor
-        w_bar = math.ceil(width * beta / factor) * factor
-    return h_bar, w_bar
 
 
 class Qwen25VLGRPOTrainer(Trainer):
@@ -480,7 +451,7 @@ class Qwen25VLGRPOTrainer(Trainer):
                 original_bbox = [x1, y1, x2, y2]
                 # transform_bbox from utils expects (W, H), which is now provided correctly
                 resized_bbox = transform_bbox(original_bbox, original_size, resized_size, 'original_to_resized')
-                new_to_old = transform_bbox(resized_bbox, resized_size, original_size, 'resized_to_original')
+                # new_to_old = transform_bbox(resized_bbox, original_size, resized_size, 'resized_to_original')
                 if resized_bbox:
                     # 创建新的bbox字符串
                     new_bbox_str = f"[{int(resized_bbox[0])}, {int(resized_bbox[1])}, {int(resized_bbox[2])}, {int(resized_bbox[3])}]"

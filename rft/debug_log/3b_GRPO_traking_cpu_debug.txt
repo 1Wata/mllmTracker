@@ -188,3 +188,23 @@ Reference: Tracking results for 'basketball being played by a boy in white shirt
 Predicted bbox (resized): [197, 38, 243, 76]
 Predicted bbox (original): [600, 122, 740, 244]
 Ground truth bbox (original): [384, 233, 480, 327]
+------------- 05-14-13-40-103013 Tracking IoU reward: 0.0 -------------
+Original Size: (1280, 720), Resized Size: (420, 224)
+Model output: <answer>[198, 37, 239, 84]
+Reference: Tracking results for 'basketball being played by a boy in white shirt':
+
+<answer>[384, 233, 480, 327]</answer>
+
+Predicted bbox (resized): [198, 37, 239, 84]
+Predicted bbox (original): [603.4285714285714, 118.92857142857143, 728.3809523809523, 270.0]
+Ground truth bbox (original): [384, 233, 480, 327]
+------------- 05-14-13-40-103013 Tracking IoU reward: 0.0 -------------
+Original Size: (1280, 720), Resized Size: (420, 224)
+Model output: <answer>[197, 38, 243, 76]
+Reference: Tracking results for 'basketball being played by a boy in white shirt':
+
+<answer>[384, 233, 480, 327]</answer>
+
+Predicted bbox (resized): [197, 38, 243, 76]
+Predicted bbox (original): [600.3809523809523, 122.14285714285715, 740.5714285714286, 244.2857142857143]
+Ground truth bbox (original): [384, 233, 480, 327]
