@@ -477,7 +477,7 @@ class Qwen25VLGRPOTrainer(Trainer):
         #   模型需要被训练来理解这些归一化坐标。
         
         
-        
+        ####
         # Pass the flat list of images and counts to the processor
         processor_kwargs = {
             "text": prompts_text,
