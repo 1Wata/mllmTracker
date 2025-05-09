@@ -87,17 +87,22 @@ cd rft
 ​	推理脚本在 dataset_interface 文件夹下，采用了多进程推理，默认使用全部的显卡推理（几张显卡几个进程）（这个由于没有资源跑，我不能完全保证代码没有问题）
 
 ```
-python rft_inference.py \
-    --model_path /path/to/your/rft_finetuned_model \
-    --dataset_name OTB_lang \
-    --output_dir /path/to/save/results \
+cd dataset_interface
+python rft_inference_wo_crop.py \
+    --model_path "/path/to/your/Qwen2_5_VLForConditionalGeneration_model_directory" \
+    --dataset_name "OTB_lang" \
+    --output_dir "path/to/otb_tracking_results" \
+    --save_vis False \
+    --gap_list 1 10 \
+    --smart_resize_min_pixels 3136 \
+    --smart_resize_max_pixels 102400 \
 ```
 
 进行 metrics 的计算：
 
 ```
 python analysis_results.py \
-	--results_path "path/to/output/dir" \
+	--results_path "path/to/otb_tracking_results" \
 	--dataset_name "otb_lang"
 ```
 

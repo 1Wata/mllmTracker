@@ -12,8 +12,29 @@ from utils.utils import normalize_bbox_xyhw
 from make_crop_dataset import crop_and_pad_template, crop_and_pad_search, jitter_bbox, convert_bbox_format, is_bbox_fully_visible
 
 
+def normalize_and_scale_bbox_abs(bbox_abs, img_w, img_h):
+    """
+    Normalizes an absolute bbox [x1, y1, x2, y2] and scales to 1000, then converts to int.
+    Args:
+        bbox_abs: List or tuple [x1, y1, x2, y2] in absolute pixel coordinates.
+        img_w: Width of the image.
+        img_h: Height of the image.
+    Returns:
+        List of ints [nx1, ny1, nx2, ny2] scaled to 1000.
+    """
+    if img_w == 0 or img_h == 0: # Avoid division by zero
+        print(f"Warning: Image width or height is zero (w={img_w}, h={img_h}). Returning zero bbox.")
+        return [0, 0, 0, 0]
+    return [
+        int(bbox_abs[0] / img_w * 1000),
+        int(bbox_abs[1] / img_h * 1000),
+        int(bbox_abs[2] / img_w * 1000),
+        int(bbox_abs[3] / img_h * 1000)
+    ]
+
+
 def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracking_dataset_cropped",
-                                    template_frames=1, scale=2.0, search_scale=4.0, resize=320, no_crop=False):
+                                    template_frames=1, scale=2.0, search_scale=4.0, resize=320, no_crop=False, normalize_bbox=False):
     """
     构建一个跟踪数据集，可选是否使用裁剪图像。
     
@@ -25,6 +46,7 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
         search_scale: 搜索帧裁剪的缩放因子
         resize: 裁剪后图像的尺寸
         no_crop: 是否不裁剪图像，直接使用原始图像路径
+        normalize_bbox: 是否对边界框进行归一化 (乘以1000并取整)
     """
     # 创建输出目录
     os.makedirs(output_dir, exist_ok=True)
@@ -39,6 +61,9 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
     all_samples = []
     skipped_count = 0
     processed_count = 0
+    
+    # 根据 normalize_bbox 参数确定实际使用的系统提示
+    current_tracking_system_prompt = get_tracking_system_prompt(use_thinking=False, normalize_bbox_for_system_prompt=normalize_bbox)
     
     # 确定要处理的样本数量
     if hasattr(pytorch_dataset, 'samples_per_epoch') and pytorch_dataset.samples_per_epoch is not None:
@@ -97,6 +122,20 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
             'visible': template_valid_list + search_valid_list
         }
 
+        # --- 获取所有帧的原始尺寸 (如果需要归一化或裁剪) ---
+        all_frame_dims = []
+        if normalize_bbox or not no_crop:
+            for frame_path_for_dim in frame_paths:
+                try:
+                    with Image.open(frame_path_for_dim) as img:
+                        img_w, img_h = img.size
+                        all_frame_dims.append((img_w, img_h))
+                except FileNotFoundError:
+                    print(f"Warning: Frame path not found: {frame_path_for_dim} for sample {i}. Skipping dimension retrieval for this frame.")
+                    all_frame_dims.append((0,0)) # Add placeholder to maintain index correspondence
+                    # Consider skipping sample if critical dimensions are missing
+                    # For now, normalization function will handle 0 dimensions
+
         # --- Determine template indices based on probability ---
         # 10% chance to use only the last template frame if more than one is requested and available
         use_last_template_only = random.random() < 0.1 and template_frames > 1 and len(template_frame_paths) > 0
@@ -120,23 +159,30 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
 
             # 使用原始边界框
             cropped_search_bboxes = []
-            for search_idx in search_indices:
-                bbox_raw = annotations_dict['bbox'][search_idx]
+            for s_idx_loop, frame_path_global_idx in enumerate(search_indices):
+                bbox_raw = annotations_dict['bbox'][frame_path_global_idx]
                 bbox_raw = bbox_raw.tolist() if isinstance(bbox_raw, torch.Tensor) else bbox_raw
-                search_bbox = convert_bbox_format(bbox_raw)  # 转换为 [x1, y1, x2, y2] 格式
-                cropped_search_bboxes.append(search_bbox)
+                search_bbox_abs = convert_bbox_format(bbox_raw)  # 转换为 [x1, y1, x2, y2] 格式
+                
+                if normalize_bbox:
+                    if frame_path_global_idx < len(all_frame_dims):
+                        img_w, img_h = all_frame_dims[frame_path_global_idx]
+                        processed_bbox = normalize_and_scale_bbox_abs(search_bbox_abs, img_w, img_h)
+                    else:
+                        print(f"Warning: Missing dimensions for frame_path_global_idx {frame_path_global_idx} in no_crop mode for sample {i}. Using [0,0,0,0] for normalized bbox.")
+                        processed_bbox = [0,0,0,0]
+                else:
+                    processed_bbox = [int(c) for c in search_bbox_abs]
+                cropped_search_bboxes.append(processed_bbox)
 
         else:
             # 裁剪模式下的处理逻辑
             # --- 获取所有帧的原始数据 ---
             all_bboxes_orig_raw = []
-            all_frame_dims = []
+            # all_frame_dims is already populated if not no_crop
 
             for frame_idx, frame_path in enumerate(frame_paths):
-                with Image.open(frame_path) as img:
-                    img_w, img_h = img.size
-                    all_frame_dims.append((img_w, img_h))
-
+                # Dimensions already read into all_frame_dims
                 bbox_raw = annotations_dict['bbox'][frame_idx].tolist() if isinstance(annotations_dict['bbox'][frame_idx], torch.Tensor) else annotations_dict['bbox'][frame_idx]
                 convert_bbox_format(bbox_raw)  # 检查边界框格式是否有效
                 all_bboxes_orig_raw.append(bbox_raw)
@@ -185,7 +231,7 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
                 search_bbox_orig = convert_bbox_format(all_bboxes_orig_raw[search_idx])
 
                 try:
-                    cropped_search_img, search_bbox_new, crop_region, _ = crop_and_pad_search(
+                    cropped_search_img, search_bbox_new_abs, crop_region, _ = crop_and_pad_search(
                         frame_paths[search_idx],
                         reference_bbox_for_search_crop,
                         search_bbox_orig,
@@ -200,7 +246,13 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
                     cropped_search_img.save(search_save_path)
 
                     cropped_search_paths.append(search_save_path)
-                    cropped_search_bboxes.append(search_bbox_new)
+                    
+                    if normalize_bbox:
+                        # For cropped images, normalization is relative to the cropped image size (resize x resize)
+                        processed_bbox = normalize_and_scale_bbox_abs(search_bbox_new_abs, resize, resize)
+                    else:
+                        processed_bbox = [int(c) for c in search_bbox_new_abs]
+                    cropped_search_bboxes.append(processed_bbox)
                 except Exception as e:
                     print(f"Warning: Error processing search frame {search_idx} for sample {i}: {e}")
                     continue # Skip this search frame
@@ -223,17 +275,30 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
             init_user_content.append({"type": "image"})
 
 
-        for idx, template_idx in enumerate(template_indices):
+        for idx, template_original_idx in enumerate(template_indices):
             if no_crop:
                 # 原始坐标系下的bbox
-                bbox_raw = template_anno_dict.get('bbox', [])[template_idx]
-                if isinstance(bbox_raw, torch.Tensor):
-                    bbox_raw = bbox_raw.tolist()
-                template_bbox = convert_bbox_format(bbox_raw)  # 转换为 [x1, y1, x2, y2] 格式
-                
-                if template_bbox:
-                    bbox_text = f"\nThe bounding box for template frame {idx+1} is: [{int(template_bbox[0])}, {int(template_bbox[1])}, {int(template_bbox[2])}, {int(template_bbox[3])}]."
-                    init_user_content.append({"text": bbox_text})
+                bbox_raw_list = template_anno_dict.get('bbox', [])
+                if template_original_idx < len(bbox_raw_list):
+                    bbox_raw = bbox_raw_list[template_original_idx]
+                    if isinstance(bbox_raw, torch.Tensor):
+                        bbox_raw = bbox_raw.tolist()
+                    template_bbox_abs = convert_bbox_format(bbox_raw)  # 转换为 [x1, y1, x2, y2] 格式
+                    
+                    if template_bbox_abs:
+                        if normalize_bbox:
+                            if template_original_idx < len(all_frame_dims):
+                                img_w, img_h = all_frame_dims[template_original_idx]
+                                norm_bbox = normalize_and_scale_bbox_abs(template_bbox_abs, img_w, img_h)
+                                bbox_text = f"\nThe normalized bounding box (scaled to 1000) for template frame {idx+1} is: [{norm_bbox[0]}, {norm_bbox[1]}, {norm_bbox[2]}, {norm_bbox[3]}]."
+                            else:
+                                bbox_text = f"\nWarning: Missing dimensions for template_original_idx {template_original_idx} in no_crop mode for sample {i}. Cannot provide normalized bbox."
+                        else:
+                            bbox_text = f"\nThe bounding box for template frame {idx+1} is: [{int(template_bbox_abs[0])}, {int(template_bbox_abs[1])}, {int(template_bbox_abs[2])}, {int(template_bbox_abs[3])}]."
+                        init_user_content.append({"text": bbox_text})
+                else:
+                    print(f"Warning: template_original_idx {template_original_idx} out of bounds for template_anno_dict['bbox'] (len {len(bbox_raw_list)}) for sample {i}.")
+
             else:
                 # 裁剪模式下不需要添加，因为已经通过裁剪图像隐式传达了目标位置
                 pass
@@ -253,7 +318,11 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
         else:
             tracking_instruction += "the next frame. "
             tracking_instruction += "Provide a bounding box for the last frame. "
-        # tracking_instruction += "The bounding box should be in [x1, y1, x2, y2] format. "
+        
+        if normalize_bbox:
+            tracking_instruction += "The bounding box should be in normalized [x1, y1, x2, y2] format, where coordinates are integers scaled to the range [0, 1000]. "
+        else:
+            tracking_instruction += "The bounding box should be in [x1, y1, x2, y2] format with absolute pixel coordinates. "
         # tracking_instruction += "Wrap each answer in <answer></answer> tags."
         init_user_content.append({"text": tracking_instruction})
 
@@ -304,7 +373,7 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
         # 创建样本
         sample_data = {
             "image": image_paths_for_sample,
-            "problem": TRACKING_SYSTEM_PROMPT,
+            "problem": current_tracking_system_prompt,
             "solution": solution,
             "prompt": prompt_messages
         }
@@ -341,7 +410,7 @@ def build_one_turn_tracking_dataset(pytorch_dataset, output_dir="one_turn_tracki
     
     return hf_dataset
 
-def get_tracking_system_prompt(use_thinking=False):
+def get_tracking_system_prompt(use_thinking=False, normalize_bbox_for_system_prompt=False):
     """获取追踪任务的系统提示"""
     base_prompt = (
         "You are a professional visual object tracking assistant. Your task is to track a specified target object. "
@@ -349,18 +418,20 @@ def get_tracking_system_prompt(use_thinking=False):
         "First, identify the target in the template frames. Then, locate the target's position in the following search frames."
     )
     
+    bbox_format_instruction = "the target's bounding box coordinates in the format [x1, y1, x2, y2], where (x1, y1) is the top-left coordinate and (x2, y2) is the bottom-right coordinate."
+    if normalize_bbox_for_system_prompt:
+        bbox_format_instruction = "the target's bounding box coordinates in normalized [x1, y1, x2, y2] format, where coordinates are integers scaled to the range [0, 1000]."
+    
     if use_thinking:
         return base_prompt + (
-            "You should first think about how to locate the target by analyzing visual features, then provide your answer. "
+            " You should first think about how to locate the target by analyzing visual features, then provide your answer. "
             "Put your thinking process inside <thinking>...</thinking> tags. "
-            "Your final answer should be the target's bounding box coordinates in the format [x1, y1, x2, y2], "
-            "where (x1, y1) is the top-left coordinate and (x2, y2) is the bottom-right coordinate. "
+            f"Your final answer should be {bbox_format_instruction} "
             "Wrap your final answer in <answer>[x1, y1, x2, y2]</answer> tags."
         )
     else:
         return base_prompt + (
-            "Please directly return the target's bounding box coordinates in the format [x1, y1, x2, y2], "
-            "where (x1, y1) is the top-left coordinate and (x2, y2) is the bottom-right coordinate. "
+            f" Please directly return {bbox_format_instruction} "
             "Your answer should be wrapped in <answer>[x1, y1, x2, y2]</answer> tags."
         )
 
@@ -383,6 +454,7 @@ if __name__ == "__main__":
     parser.add_argument("--template_frames", type=int, default=2)
     parser.add_argument("--search_frames", type=int, default=1)
     parser.add_argument("--no_crop", default=True, help="是否不裁剪图像，直接使用原始图像路径")
+    parser.add_argument("--normalize_bbox", default=True, help="是否使用归一化的边界框。如果是，坐标将被归一化并乘以1000取整。")
     
     # 解析命令行参数
     args = parser.parse_args()
@@ -422,7 +494,8 @@ if __name__ == "__main__":
         scale=args.scale,
         search_scale=args.search_scale,
         resize=args.resize,
-        no_crop=args.no_crop
+        no_crop=args.no_crop,
+        normalize_bbox=args.normalize_bbox
     )
     
     # 加载并检查数据集

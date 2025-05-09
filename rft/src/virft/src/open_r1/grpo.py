@@ -382,8 +382,12 @@ def main(script_args, training_args, model_args):
     # dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
     # Load the dataset from local disk
     from datasets import DatasetDict
+    train_dataset_from_parquet = load_dataset("parquet", data_files=script_args.dataset_name, split="train")
+        # 将其包装在 DatasetDict 中，因为脚本的其余部分可能期望这种格式
+        # 使用 script_args.dataset_train_split (默认为 "train") 作为键
+    dataset = DatasetDict({"train": train_dataset_from_parquet})
     # dataset = DatasetDict.load_from_disk(script_args.dataset_name)
-    dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
+    # dataset = load_dataset(script_args.dataset_name, name=script_args.dataset_config)
     
 
     # Format into conversation

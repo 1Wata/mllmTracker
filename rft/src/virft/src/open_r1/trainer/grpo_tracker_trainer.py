@@ -63,8 +63,7 @@ if is_wandb_available():
 # rewards. When it's a string, it's a model ID, so it's loaded as a pretrained model.
 RewardFunc = Union[str, PreTrainedModel, Callable[[list, list], list[float]]]
 
-
-
+import re # 确保导入 re 模块
 
 class Qwen25VLGRPOTrainer(Trainer):
     """
@@ -114,9 +113,11 @@ class Qwen25VLGRPOTrainer(Trainer):
         max_pixels: Optional[int] = 12845056,
         min_pixels: Optional[int] = 3136,
         attn_implementation: str = "flash_attention_2",
+        use_normalized_bbox: bool = False, # 添加参数
     ):
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
+        self.use_normalized_bbox = use_normalized_bbox # 存储参数
         # Configure args
         if args is None:
             model_name = model if isinstance(model, str) else model.config._name_or_path
@@ -412,17 +413,17 @@ class Qwen25VLGRPOTrainer(Trainer):
 
         # 创建包含system prompt的完整输入
         formatted_examples = []
-        for i, example in enumerate(inputs):
+        for i_example, example_data in enumerate(inputs): # Renamed variables for clarity
             # 深拷贝避免修改原始输入
-            formatted_example = copy.deepcopy(example)
+            formatted_example = copy.deepcopy(example_data)
             # 如果存在system prompt，将其添加到适当位置
-            if system_prompts[i]:
+            if system_prompts[i_example]:
                 # 如果数据是对话格式，确保system prompt作为对话的第一部分
-                if is_conversational(example):
+                if is_conversational(example_data): # Use example_data here
                     if not any(msg.get("role") == "system" for msg in formatted_example["prompt"]):
-                        formatted_example["prompt"].insert(0, {"role": "system", "content": system_prompts[i]})
+                        formatted_example["prompt"].insert(0, {"role": "system", "content": system_prompts[i_example]})
                 else:
-                    formatted_example["system_prompt"] = system_prompts[i]
+                    formatted_example["system_prompt"] = system_prompts[i_example]
             formatted_examples.append(formatted_example)
 
         # 使用处理后的examples
@@ -431,54 +432,61 @@ class Qwen25VLGRPOTrainer(Trainer):
 
         # --- Start: Flatten images and get counts ---
         flat_images = [img for sample_images in images_per_sample for img in sample_images]
-        image_counts = [len(sample_images) for sample_images in images_per_sample]
+        # image_counts = [len(sample_images) for sample_images in images_per_sample] # Not used in current Qwen processor
         # --- End: Flatten images and get counts ---
 
         # original_sizes and resized_sizes are now (W, H)
-        original_sizes, resized_sizes = self._calculate_image_sizes(images_per_sample)
+        actual_original_image_sizes, resized_image_sizes = self._calculate_image_sizes(images_per_sample)
 
-
-        for i, prompt_text in enumerate(prompts_text):
-            original_size = original_sizes[i] # (W, H)
-            resized_size = resized_sizes[i]   # (W, H)
-            # 使用正则表达式查找并替换bbox文本
-            import re
-            bbox_pattern = r"bounding box for template frame .+ is: \[(\d+), (\d+), (\d+), (\d+)\]"
-            matches = re.findall(bbox_pattern, prompt_text)
-            
-            for match in matches:
-                x1, y1, x2, y2 = map(int, match)
-                original_bbox = [x1, y1, x2, y2]
-                # transform_bbox from utils expects (W, H), which is now provided correctly
-                resized_bbox = transform_bbox(original_bbox, original_size, resized_size, 'original_to_resized')
-                # new_to_old = transform_bbox(resized_bbox, original_size, resized_size, 'resized_to_original')
-                if resized_bbox:
-                    # 创建新的bbox字符串
-                    new_bbox_str = f"[{int(resized_bbox[0])}, {int(resized_bbox[1])}, {int(resized_bbox[2])}, {int(resized_bbox[3])}]"
-                    # 替换原始字符串中的bbox
-                    old_bbox_str = f"[{x1}, {y1}, {x2}, {y2}]"
-                    prompt_text = prompt_text.replace(old_bbox_str, new_bbox_str)
-
+        if not self.use_normalized_bbox:
+            for i, prompt_text_item in enumerate(prompts_text): # Renamed variable for clarity
+                # 如果不使用归一化bbox (即bbox是原始图像的绝对像素坐标),
+                # 则将prompt中的bbox从原始图像坐标转换为相对于模型将看到的缩放后图像的坐标。
+                current_original_size = actual_original_image_sizes[i]  # (W, H)
+                current_resized_size = resized_image_sizes[i]    # (W, H)
                 
-                
-            # 更新prompts_text
-            prompts_text[i] = prompt_text
+                # Pattern to find "bounding box ... is: [x1, y1, x2, y2]"
+                # Captures:
+                # 1. The prefix text (e.g., "bounding box for template frame X is: ")
+                # 2. x1, 3. y1, 4. x2, 5. y2
+                bbox_pattern_for_sub = r"(bounding box for template frame .+? is: )\[(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\]"
+
+                def transform_bbox_in_prompt(match_obj):
+                    prefix = match_obj.group(1)
+                    x1, y1, x2, y2 = map(int, [match_obj.group(2), match_obj.group(3), match_obj.group(4), match_obj.group(5)])
+                    
+                    bbox_in_original_img_coords = [x1, y1, x2, y2]
+                    
+                    bbox_in_resized_img_coords = transform_bbox(
+                        bbox_in_original_img_coords,
+                        current_original_size, 
+                        current_resized_size,   
+                        'original_to_resized'
+                    )
+                    
+                    if bbox_in_resized_img_coords:
+                        new_bbox_str = f"[{int(bbox_in_resized_img_coords[0])}, {int(bbox_in_resized_img_coords[1])}, {int(bbox_in_resized_img_coords[2])}, {int(bbox_in_resized_img_coords[3])}]"
+                        return prefix + new_bbox_str
+                    else:
+                        return match_obj.group(0) # Keep original if transform fails
+
+                prompts_text[i] = re.sub(bbox_pattern_for_sub, transform_bbox_in_prompt, prompt_text_item)
+        # else: (if self.use_normalized_bbox is True)
+        #   假定prompt中的bbox已经是归一化的 (例如 0-1000 范围)。
+        #   此处不进行转换，它们将按原样作为文本提示的一部分传递给模型。
+        #   模型需要被训练来理解这些归一化坐标。
         
         
         
         # Pass the flat list of images and counts to the processor
-        # Check if the processor supports 'image_counts' argument
-        processor_signature = inspect.signature(self.processing_class.__call__)
         processor_kwargs = {
             "text": prompts_text,
-            "images": flat_images, # Pass the flat list
+            "images": flat_images, 
             "return_tensors": "pt",
             "padding": True,
             "padding_side": "left",
             "add_special_tokens": False,
         }
-        if 'image_counts' in processor_signature.parameters:
-             processor_kwargs['image_counts'] = image_counts # Pass the counts if supported
 
         prompt_inputs = self.processing_class(**processor_kwargs)
         prompt_inputs = super()._prepare_inputs(prompt_inputs)
@@ -566,12 +574,13 @@ class Qwen25VLGRPOTrainer(Trainer):
             for example in inputs:
                 reward_kwargs[key].extend([example[key]] * self.num_generations)
 
-        # original_sizes and resized_sizes now correctly have one pair per sample
-        reward_kwargs['original_size'] = [size for size in original_sizes for _ in range(self.num_generations)]
-        reward_kwargs['resized_size'] = [size for size in resized_sizes for _ in range(self.num_generations)]
+        # Pass both original and resized image sizes to reward function context,
+        # it might need them depending on how bbox in completions are handled.
+        reward_kwargs['original_image_size'] = [size for size in actual_original_image_sizes for _ in range(self.num_generations)]
+        reward_kwargs['resized_image_size'] = [size for size in resized_image_sizes for _ in range(self.num_generations)]
+        reward_kwargs['use_normalized_bbox'] = [self.use_normalized_bbox] * len(prompts) # Pass the flag
         # --- End: Prepare reward_kwargs including sizes ---
 
-        # ... rest of the reward calculation and loss computation ...
         # Calculate rewards for each reward function
         rewards_per_func = torch.zeros(len(prompts), len(self.reward_funcs), device=device)
         for i, (reward_func, reward_processing_class) in enumerate(

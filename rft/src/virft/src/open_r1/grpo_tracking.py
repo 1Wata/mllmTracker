@@ -70,6 +70,10 @@ class TrackingGRPOScriptArguments(ScriptArguments):
         default=False,
         metadata={"help": "Whether to use thinking process in model responses"},
     )
+    use_normalized_bbox: bool = field(
+        default=True,
+        metadata={"help": "Whether to use normalized bounding box coordinates"},
+    )
 
 def extract_single_bbox(response):
     """
@@ -227,15 +231,16 @@ def tracking_reward_iou(completions, solution, **kwargs):
     else:
         raise ValueError("Unsupported completion format")
 
-    # Get use_thinking from kwargs if passed, otherwise default (e.g., False)
-    use_thinking = kwargs.get('use_thinking', False) # Default to False if not provided
-
+    use_thinking = kwargs.get('use_thinking', False)
     rewards = []
     current_time = datetime.now().strftime("%d-%H-%M-%S-%f")
 
     # Get size information from kwargs (expecting lists)
     original_sizes = kwargs.get('original_size', [None] * len(contents))
     resized_sizes = kwargs.get('resized_size', [None] * len(contents))
+
+    # 是否使用normalized bbox
+    use_normalized = kwargs.get('use_normalized_bbox', False)
 
     for i, (content, sol) in enumerate(zip(contents, solution)):
         reward = 0.0
@@ -247,22 +252,42 @@ def tracking_reward_iou(completions, solution, **kwargs):
         # 从参考答案中提取边界框 (assumed in original coordinates)
         bbox_gt_orig = extract_single_bbox(sol)
 
-        # Transform predicted bbox to original coordinates if sizes are available
-        bbox_pred_orig = None
-        if bbox_pred_resized and original_size and resized_size:
-            bbox_pred_orig = transform_bbox(bbox_pred_resized, original_size, resized_size, 'resized_to_original')
+        # 如果不使用normalized bbox，则转换bbox坐标
+        if not use_normalized:
+            if bbox_pred_resized:
+                w, h = resized_size
+                bbox_pred_resized = [
+                    bbox_pred_resized[0] / 1000 * w,
+                    bbox_pred_resized[1] / 1000 * h,
+                    bbox_pred_resized[2] / 1000 * w,
+                    bbox_pred_resized[3] / 1000 * h,
+                ]
+            if bbox_gt_orig:
+                w, h = resized_size
+                bbox_gt_orig = [
+                    bbox_gt_orig[0] / 1000 * w,
+                    bbox_gt_orig[1] / 1000 * h,
+                    bbox_gt_orig[2] / 1000 * w,
+                    bbox_gt_orig[3] / 1000 * h,
+                ]
+            # Transform predicted bbox to original coordinates if sizes are available
+            bbox_pred_final = None
+            if bbox_pred_resized and original_size and resized_size:
+                bbox_pred_final = transform_bbox(bbox_pred_resized, original_size, resized_size, 'resized_to_original')
+        else:
+            # 使用normalized时，直接使用输入的归一化坐标，不进行resize转换
+            bbox_pred_final = bbox_pred_resized
+            # 同样假定参考答案也保持normalized状态
 
-        # Calculate IoU using boxes in the *same* (original) coordinate system
-        if bbox_pred_orig and bbox_gt_orig:
-            reward = calculate_iou(bbox_pred_orig, bbox_gt_orig)
+        # Calculate IoU using boxes (in normalized coordinate if use_normalized is True)
+        if bbox_pred_final and bbox_gt_orig:
+            reward = calculate_iou(bbox_pred_final, bbox_gt_orig)
         elif bbox_pred_resized and bbox_gt_orig and (not original_size or not resized_size):
-             # Log if transformation couldn't happen due to missing size info
-             print(f"Debug IoU: Calc skipped due to missing size info. Pred(res):{bbox_pred_resized}, GT(orig):{bbox_gt_orig}")
-        elif bbox_pred_resized and bbox_gt_orig and not bbox_pred_orig:
-             # Log if transformation failed but extraction worked
-             print(f"Debug IoU: Calc skipped due to transform failure. Pred(res):{bbox_pred_resized}, GT(orig):{bbox_gt_orig}, Orig:{original_size}, Res:{resized_size}")
+            print(f"Debug IoU: Calc skipped due to missing size info. Pred:{bbox_pred_resized}, GT:{bbox_gt_orig}")
+        elif bbox_pred_resized and bbox_gt_orig and not bbox_pred_final:
+            print(f"Debug IoU: Calc skipped due to transform failure. Pred:{bbox_pred_resized}, GT:{bbox_gt_orig}, Orig:{original_size}, Res:{resized_size}")
 
-        rewards.append(reward)
+        rewards.append(reward**2 * 10)
 
         if os.getenv("DEBUG_MODE") == "true":
             log_path = os.getenv("LOG_PATH")
@@ -271,9 +296,8 @@ def tracking_reward_iou(completions, solution, **kwargs):
                 f.write(f"Original Size: {original_size}, Resized Size: {resized_size}\n")
                 f.write(f"Model output: {content}\n")
                 f.write(f"Reference: {sol}\n")
-                f.write(f"Predicted bbox (resized): {bbox_pred_resized}\n")
-                f.write(f"Predicted bbox (original): {bbox_pred_orig}\n") # Log transformed box
-                f.write(f"Ground truth bbox (original): {bbox_gt_orig}\n")
+                f.write(f"Predicted bbox: {bbox_pred_final}\n")
+                f.write(f"Ground truth bbox: {bbox_gt_orig}\n")
 
     return rewards
 
